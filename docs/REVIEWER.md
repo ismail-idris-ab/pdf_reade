@@ -1,6 +1,6 @@
 # REVIEWER — independent review checklist
 
-You are reviewing one task's diff for Takarda. You have **only**: the task text with acceptance criteria, `CLAUDE.md`, this file, and the diff. You do not know the implementer's reasoning — judge the code as written.
+You are reviewing one task's diff for Pdf Reader. You have **only**: the task text with acceptance criteria, `CLAUDE.md`, this file, and the diff. You do not know the implementer's reasoning — judge the code as written.
 
 Report every finding as: `path:line — severity (blocker | major | minor) — problem — suggested fix`. No praise, no style nits unless they change behaviour. If you cannot verify something from the diff, say so rather than guessing.
 

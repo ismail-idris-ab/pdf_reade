@@ -1,0 +1,18 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.ismailidris.pdfreader.pdfengine'
+version = '0.1.0'
+
+android {
+  namespace "com.ismailidris.pdfreader.pdfengine"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lint {
+    abortOnError true
+  }
+}
