@@ -8,11 +8,11 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 
 ## Phase 0 — Foundation
 
-- [ ] **T0.1 Project init** `[launch]`
+- [x] **T0.1 Project init** `[launch]`
   Expo (latest SDK) + dev client, TS strict, expo-router, NativeWind v4, ESLint/Prettier, `@/` path alias. `eas.json` with `development`, `preview` (APK), `production` (AAB) profiles. Android package id `com.ismailidris.pdfreader`, `minSdkVersion 26`, target SDK = current Play requirement. Local modules scaffolded: `pdf-engine`, `file-index`, `secure-vault` (empty APIs that compile).
   **Done when:** dev build installs and launches on a physical device; `tsc`, lint pass.
 
-- [ ] **T0.1b Native engine spike (PDFium + PdfBox-Android)** `[launch]`
+- [x] **T0.1b Native engine spike (PDFium + PdfBox-Android)** `[launch]`
   Timeboxed to one session; runs right after T0.1 because a failure here can change the stack. Integrate prebuilt PDFium binaries (e.g. `bblanchon/pdfium-binaries`) with a thin own JNI layer inside `modules/pdf-engine`, and PdfBox-Android, then prove the pipeline end to end. Do not build on unmaintained `pdfium-android` forks unless the checks below show they pass.
   **Done when:** (1) PDFium renders page 1 of a fixture PDF to a bitmap inside the Expo module on the Android 16 phone and the emulator; (2) PdfBox-Android merges two PDFs and the output opens in PDFium; (3) every bundled `.so` passes a 16 KB page-size alignment check; (4) release AAB size growth from the native libraries is measured and reported; (5) all licenses are verified and recorded in `docs/LICENSES.md`. If any check fails: stop, show the evidence, propose alternatives.
 
@@ -189,6 +189,10 @@ Device rule: every Phase 2 task stays `BLOCKED (device)` until it passes on the 
 
 - [ ] **T7.4 Analytics funnel** `[launch]`
   Events: install_open, permission_granted/denied, first_file_opened, tool_completed{tool}, paywall_shown{trigger}, trial_started, purchase{product}, rewarded_unlock{tool}. No file names or paths in events.
+
+- [ ] **T7.5 Open-source notices screen** `[launch]`
+  Settings → "Open-source licences": every entry in `docs/LICENSES.md`, the full licence texts shipped in the PDFium archive's `licenses/` folder, and the FreeType and IJG credit lines (required by FTL and IJG). Generated at build time from a checked-in list so it can't drift from the dependencies.
+  **Done when:** every native and bundled component in `docs/LICENSES.md` appears with its full licence text; screen works offline.
 
 ## Phase W — Web SEO companion (separate repo, parallel from Phase 3)
 

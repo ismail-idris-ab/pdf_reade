@@ -36,4 +36,4 @@ For each criterion: met / not met / cannot tell, with evidence (file:line or tes
 - Pure TS logic without Jest tests; engine ops without Kotlin tests where the task requires them.
 
 ## 7. Licensing
-- New dependency not Apache-2.0 / MIT / BSD, or missing from `docs/LICENSES.md`. Any AGPL/GPL is a blocker.
+- New dependency not under a permissive licence (CLAUDE.md licensing rule), missing from `docs/LICENSES.md`, or its notice/credit requirement not recorded. Any GPL/LGPL/AGPL is a blocker.

@@ -46,7 +46,7 @@ Fast, private, ad-honest PDF reader + scanner + editor built for real-world Andr
 - Crash reporting: Sentry.
 
 ### Licensing rule (hard)
-Only Apache-2.0 / MIT / BSD dependencies. **No AGPL** (MuPDF, iText 7) and no GPL. Verify the license of every native dependency before adding it and record it in `docs/LICENSES.md`.
+Only **permissive** licences (Apache-2.0, MIT, BSD, ISC, zlib, libpng, FreeType FTL, IJG, Unicode, Bouncy Castle and similar), with every notice or credit requirement honoured on the in-app open-source notices screen. **No copyleft:** GPL, LGPL and AGPL are rejected (e.g. MuPDF, iText 7). Verify the license of every native dependency before adding it and record it in `docs/LICENSES.md`.
 
 ## Architecture
 ```

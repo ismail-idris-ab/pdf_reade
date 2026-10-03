@@ -31,7 +31,7 @@ Everything else is **standard** (pure TS, UI, docs, tests).
 
 2. **Plan.** Short plan: approach, key types/interfaces, native/JS boundary, error codes involved, test plan.
    - Native work (Kotlin, PDFium, PdfBox-Android, ML Kit): state exact library versions.
-   - New dependency: verify license is Apache-2.0 / MIT / BSD and record it in `docs/LICENSES.md`. Reject AGPL/GPL.
+   - New dependency: verify the license is permissive (see CLAUDE.md licensing rule), record it and any notice/credit requirement in `docs/LICENSES.md`. Reject GPL/LGPL/AGPL.
    - **Gate A (risky tasks only):** stop after the plan and wait for approval. Standard tasks continue straight to step 3.
 
 3. **Verify APIs before using them.** Don't rely on memory for library APIs, Expo module APIs, Android SDK behaviour or Play policy. Read installed sources/types (`node_modules`, Gradle caches) or official docs. If something can't be verified, say so in the plan and take the most conservative approach.

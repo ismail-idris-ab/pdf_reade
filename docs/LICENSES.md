@@ -1,6 +1,6 @@
 # Dependency licenses
 
-Only Apache-2.0, MIT or BSD are allowed. AGPL and GPL are rejected. Record every native dependency (and any notable JS dependency) here before it is added, with the source used to verify the license.
+Only permissive licences are allowed, with their notice/credit requirements honoured on the in-app open-source notices screen. GPL, LGPL and AGPL are rejected (rule decided 2026-10-03, T0.1b). Record every native dependency (and any notable JS dependency) here before it is added, with the source used to verify the license.
 
 | Dependency | Version | License | Verified from | Added in |
 |------------|---------|---------|---------------|----------|
@@ -63,6 +63,6 @@ The prebuilt `libpdfium.so` statically links the components below. Their licence
 | zlib | zlib licence (permissive) | |
 | libunwind, LLVM libc | Apache-2.0 WITH LLVM-exception | |
 
-**Owner decision needed:** the rule at the top allows only Apache-2.0, MIT or BSD. FTL, IJG, zlib, libpng, Unicode v3, AGG and the Bouncy Castle Licence are permissive (no copyleft) but not on that list by name. Recommendation: change the rule to "permissive licences, with their notice requirements honoured", and keep GPL, LGPL and AGPL rejected.
+**Decision (2026-10-03, owner):** the rule was widened from "Apache-2.0 / MIT / BSD only" to "permissive licences, with their notice requirements honoured", so FTL, IJG, zlib, libpng, Unicode v3, AGG and the Bouncy Castle Licence are allowed. GPL, LGPL and AGPL stay rejected. The FreeType and IJG credit lines above, and every licence text in the PDFium archive's `licenses/` folder, must appear on the in-app open-source notices screen before release.
 
 PdfBox-Android also bundles Apache PDFBox's data files: Adobe AFM metrics for the standard 14 fonts, Adobe CMaps and glyph lists, and Unicode data files. Apache PDFBox documents these as permissively licensed. Re-check them against the PDFBox 2.0.27 `LICENSE.txt` before release (needs human verification).
