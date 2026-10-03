@@ -16,7 +16,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
   Timeboxed to one session; runs right after T0.1 because a failure here can change the stack. Integrate prebuilt PDFium binaries (e.g. `bblanchon/pdfium-binaries`) with a thin own JNI layer inside `modules/pdf-engine`, and PdfBox-Android, then prove the pipeline end to end. Do not build on unmaintained `pdfium-android` forks unless the checks below show they pass.
   **Done when:** (1) PDFium renders page 1 of a fixture PDF to a bitmap inside the Expo module on the Android 16 phone and the emulator; (2) PdfBox-Android merges two PDFs and the output opens in PDFium; (3) every bundled `.so` passes a 16 KB page-size alignment check; (4) release AAB size growth from the native libraries is measured and reported; (5) all licenses are verified and recorded in `docs/LICENSES.md`. If any check fails: stop, show the evidence, propose alternatives.
 
-- [ ] **T0.2 Database** `[launch]`
+- [x] **T0.2 Database** `[launch]`
   drizzle + expo-sqlite. Tables: `files` (id, path, uri, name, ext, mime, size, mtime, pageCount, lastOpenedAt, isFavorite, source), `bookmarks` (fileId, page, label, createdAt), `reading_state` (fileId, page, zoom, mode), `trash` (id, originalPath, trashedPath, deletedAt), `usage` (feature, day, count), `annotation_drafts` (fileId, json, updatedAt). FTS5 virtual table on file names. Typed repositories. Migrations checked in.
   **Done when:** repositories have Jest tests (in-memory or mocked) for CRUD + migration from empty.
 

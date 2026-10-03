@@ -37,10 +37,17 @@ Only permissive licences are allowed, with their notice/credit requirements hono
 | PdfBox-Android (`com.tom-roush:pdfbox-android`) | 2.0.27.0 | Apache-2.0 | Maven Central POM `licenses` | T0.1b |
 | NDK `libc++_shared.so` (already shipped by React Native; `pdf-engine` links the same copy) | NDK 27.1.12297006 | Apache-2.0 WITH LLVM-exception | present in the T0.1 baseline AAB | T0.1b (note) |
 | Bouncy Castle (`bcprov`/`bcpkix`/`bcutil-jdk18on`) | 1.86 | Bouncy Castle Licence (MIT-style) | Maven Central POM `licenses`; MIT equivalence needs human verification | T0.1b |
+| expo-sqlite | 57.0.3 | MIT | node_modules/expo-sqlite/package.json | T0.2 |
+| SQLite 3.49.1 (bundled in expo-sqlite, built with FTS5) | 3.49.1 | Public domain | node_modules/expo-sqlite/vendor/sqlite3/sqlite3.h; sqlite.org/copyright.html | T0.2 |
+| drizzle-orm | 0.45.3 | Apache-2.0 | node_modules/drizzle-orm/package.json | T0.2 |
+| drizzle-kit (dev) | 0.31.11 | MIT | node_modules/drizzle-kit/package.json | T0.2 |
+| better-sqlite3 (dev, Jest only) | 13.0.3 | MIT | node_modules/better-sqlite3/package.json | T0.2 |
+| @types/better-sqlite3 (dev) | 9.6.0 | MIT | node_modules/@types/better-sqlite3/package.json | T0.2 |
+| babel-plugin-inline-import (dev) | 3.0.0 | MIT | node_modules/babel-plugin-inline-import/package.json | T0.2 |
 
 ## Transitive dependency notes
 
-A full scan of `node_modules` (1,061 packages, T0.1) found no GPL/AGPL-only packages. One dual-licensed package:
+A full scan of `node_modules` (1,061 packages at T0.1; re-run at T0.2: 1,083 packages) found no GPL/AGPL-only packages. One dual-licensed package:
 
 - **node-forge 1.4.0** — `(BSD-3-Clause OR GPL-2.0)`. Used under **BSD-3-Clause**. Pulled in by Expo CLI tooling (dev-time only; not bundled into the app).
 
