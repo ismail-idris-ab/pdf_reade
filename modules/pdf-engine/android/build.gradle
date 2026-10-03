@@ -6,13 +6,122 @@ plugins {
 group = 'com.ismailidris.pdfreader.pdfengine'
 version = '0.1.0'
 
+// Prebuilt PDFium from https://github.com/bblanchon/pdfium-binaries.
+// Bump the release tag and every checksum together; never commit the binaries.
+def pdfiumRelease = 'chromium/8076'
+def pdfiumArchives = [
+  'arm64-v8a'  : [name: 'arm64', sha256: 'b7a6919dc130dfdf7e409bd1762ed2a306408c4faee1173668837fc446217bf7'],
+  'armeabi-v7a': [name: 'arm', sha256: '4cabe64372ec9a8f9a7e023ae1c2802068abdb5ed79d4ef5cd42f2bbde80927a'],
+  'x86_64'     : [name: 'x64', sha256: '9d043689096c7cdd4ca98fff95599be115b2a38feba0c68d2a79ba5eedbda415'],
+  'x86'        : [name: 'x86', sha256: 'eb0aa52696094f66c86994220d45b00b63cd90b13b8e76bd9b201d7f89825214'],
+]
+def pdfiumDir = layout.buildDirectory.dir('pdfium').get().asFile
+def targetAbis = (findProperty('reactNativeArchitectures') ?: pdfiumArchives.keySet().join(','))
+  .split(',').collect { it.trim() }.findAll { it }
+
+static String sha256Of(File file) {
+  def digest = java.security.MessageDigest.getInstance('SHA-256')
+  file.withInputStream { stream ->
+    byte[] buffer = new byte[65536]
+    int read
+    while ((read = stream.read(buffer)) != -1) {
+      digest.update(buffer, 0, read)
+    }
+  }
+  return digest.digest().encodeHex().toString()
+}
+
+def fetchPdfium = tasks.register('fetchPdfium') {
+  inputs.property('release', pdfiumRelease)
+  inputs.property('abis', targetAbis)
+  outputs.dir(pdfiumDir)
+  doLast {
+    targetAbis.each { abi ->
+      def archive = pdfiumArchives[abi]
+      if (archive == null) {
+        throw new GradleException("No PDFium archive configured for ABI '${abi}'")
+      }
+      def tgz = new File(pdfiumDir, "pdfium-android-${archive.name}.tgz")
+      if (!tgz.exists() || sha256Of(tgz) != archive.sha256) {
+        tgz.parentFile.mkdirs()
+        def tag = URLEncoder.encode(pdfiumRelease, 'UTF-8')
+        def url = "https://github.com/bblanchon/pdfium-binaries/releases/download/${tag}/pdfium-android-${archive.name}.tgz"
+        logger.lifecycle("Downloading ${url}")
+        // Download to a .part file with timeouts so a stalled connection fails
+        // the build instead of hanging it, and a partial file is never reused.
+        def part = new File(tgz.path + '.part')
+        def connection = new URL(url).openConnection()
+        connection.connectTimeout = 30_000
+        connection.readTimeout = 60_000
+        connection.inputStream.withStream { input -> part.withOutputStream { it << input } }
+        tgz.delete()
+        if (!part.renameTo(tgz)) {
+          throw new GradleException("Cannot move ${part} to ${tgz}")
+        }
+      }
+      def actual = sha256Of(tgz)
+      if (actual != archive.sha256) {
+        tgz.delete()
+        throw new GradleException("PDFium checksum mismatch for ${abi}: expected ${archive.sha256}, got ${actual}")
+      }
+      // Re-extract only when this ABI was unpacked from a different archive, so
+      // switching ABI sets between builds never deletes libraries in use.
+      def abiDir = new File(pdfiumDir, abi)
+      def marker = new File(abiDir, '.archive-sha256')
+      def library = new File(abiDir, 'lib/libpdfium.so')
+      if (!marker.exists() || marker.text != archive.sha256 || !library.exists()) {
+        project.delete(abiDir)
+        project.copy {
+          from project.tarTree(project.resources.gzip(tgz))
+          into abiDir
+        }
+        marker.text = archive.sha256
+      }
+    }
+  }
+}
+
 android {
   namespace "com.ismailidris.pdfreader.pdfengine"
+  if (rootProject.ext.has("ndkVersion")) {
+    ndkVersion rootProject.ext.ndkVersion
+  }
   defaultConfig {
     versionCode 1
     versionName "0.1.0"
+    consumerProguardFiles "consumer-rules.pro"
+    externalNativeBuild {
+      cmake {
+        arguments "-DPDFIUM_DIR=${pdfiumDir.absolutePath.replace('\\', '/')}",
+          '-DANDROID_STL=c++_shared'
+        abiFilters(*targetAbis)
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path 'src/main/cpp/CMakeLists.txt'
+    }
+  }
+  buildFeatures {
+    buildConfig true
   }
   lint {
     abortOnError true
   }
+}
+
+tasks.named('preBuild') { dependsOn fetchPdfium }
+tasks.matching { it.name.startsWith('configureCMake') || it.name.startsWith('buildCMake') }
+  .configureEach { dependsOn fetchPdfium }
+
+dependencies {
+  // PdfBox-Android: last upstream release is 2.0.27.0 (Jan 2023). Its pinned
+  // BouncyCastle 1.72 is replaced by the current jdk18on line.
+  implementation('com.tom-roush:pdfbox-android:2.0.27.0') {
+    exclude group: 'org.bouncycastle'
+  }
+  implementation 'org.bouncycastle:bcprov-jdk18on:1.86'
+  implementation 'org.bouncycastle:bcpkix-jdk18on:1.86'
+  implementation 'org.bouncycastle:bcutil-jdk18on:1.86'
 }

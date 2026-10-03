@@ -32,9 +32,37 @@ Only Apache-2.0, MIT or BSD are allowed. AGPL and GPL are rejected. Record every
 | prettier (dev) | 3.9.9 | MIT | node_modules/prettier/package.json | T0.1 |
 | tailwindcss (dev) | 3.4.19 | MIT | node_modules/tailwindcss/package.json | T0.1 |
 | typescript (dev) | 6.0.3 | Apache-2.0 | node_modules/typescript/package.json | T0.1 |
+| PDFium 156.0.8076.0 (prebuilt) | chromium/8076 | BSD-3-Clause | release archive `licenses/pdfium.txt` | T0.1b |
+| bblanchon/pdfium-binaries (packaging) | chromium/8076 | MIT | release archive `LICENSE` | T0.1b |
+| PdfBox-Android (`com.tom-roush:pdfbox-android`) | 2.0.27.0 | Apache-2.0 | Maven Central POM `licenses` | T0.1b |
+| NDK `libc++_shared.so` (already shipped by React Native; `pdf-engine` links the same copy) | NDK 27.1.12297006 | Apache-2.0 WITH LLVM-exception | present in the T0.1 baseline AAB | T0.1b (note) |
+| Bouncy Castle (`bcprov`/`bcpkix`/`bcutil-jdk18on`) | 1.86 | Bouncy Castle Licence (MIT-style) | Maven Central POM `licenses`; MIT equivalence needs human verification | T0.1b |
 
 ## Transitive dependency notes
 
 A full scan of `node_modules` (1,061 packages, T0.1) found no GPL/AGPL-only packages. One dual-licensed package:
 
 - **node-forge 1.4.0** — `(BSD-3-Clause OR GPL-2.0)`. Used under **BSD-3-Clause**. Pulled in by Expo CLI tooling (dev-time only; not bundled into the app).
+
+## Components bundled inside PDFium (T0.1b)
+
+The prebuilt `libpdfium.so` statically links the components below. Their licence texts ship in the release archive under `licenses/`, and all of them must appear on the app's open-source notices screen.
+
+| Component | Licence | Notes |
+|-----------|---------|-------|
+| PDFium | BSD-3-Clause | |
+| Abseil, cpu_features | Apache-2.0 | |
+| Catapult | BSD-3-Clause | |
+| fast_float, simdutf, Little CMS | MIT | |
+| Anti-Grain Geometry 2.3 | AGG licence (permissive) | Keep the notice. |
+| FreeType | FreeType Licence (FTL) | The archive ships the FTL text only (no GPL option). FTL requires this credit in the documentation: "Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved." |
+| ICU | Unicode License v3 (permissive) | |
+| libjpeg-turbo | IJG + BSD-3-Clause | IJG requires this line in the documentation: "This software is based in part on the work of the Independent JPEG Group." |
+| OpenJPEG | BSD-2-Clause | |
+| libpng | PNG Reference Library License v2 (permissive) | |
+| zlib | zlib licence (permissive) | |
+| libunwind, LLVM libc | Apache-2.0 WITH LLVM-exception | |
+
+**Owner decision needed:** the rule at the top allows only Apache-2.0, MIT or BSD. FTL, IJG, zlib, libpng, Unicode v3, AGG and the Bouncy Castle Licence are permissive (no copyleft) but not on that list by name. Recommendation: change the rule to "permissive licences, with their notice requirements honoured", and keep GPL, LGPL and AGPL rejected.
+
+PdfBox-Android also bundles Apache PDFBox's data files: Adobe AFM metrics for the standard 14 fonts, Adobe CMaps and glyph lists, and Unicode data files. Apache PDFBox documents these as permissively licensed. Re-check them against the PDFBox 2.0.27 `LICENSE.txt` before release (needs human verification).

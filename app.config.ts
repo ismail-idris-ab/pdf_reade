@@ -47,6 +47,11 @@ const config: ExpoConfig = {
           targetSdkVersion: 36,
           enableMinifyInReleaseBuilds: true,
           enableShrinkResourcesInReleaseBuilds: true,
+          packagingOptions: {
+            // bcprov, bcpkix and bcutil each ship an identical copy of the
+            // Bouncy Castle licence.
+            pickFirst: ['META-INF/LICENSE.md'],
+          },
         },
       },
     ],
