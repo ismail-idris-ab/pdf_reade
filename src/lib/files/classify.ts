@@ -32,6 +32,21 @@ export function mimeForExt(ext: string): string | null {
   return MIME_BY_EXT[ext.toLowerCase()] ?? null;
 }
 
+// Alternative MIME types some document providers report.
+const EXT_BY_MIME_ALIAS: Readonly<Record<string, string>> = {
+  'text/comma-separated-values': 'csv',
+  'application/csv': 'csv',
+};
+
+/** Document extension for a MIME type (parameters and case ignored), or null. */
+export function extForMime(mime: string): string | null {
+  const base = mime.split(';')[0]?.trim().toLowerCase() ?? '';
+  for (const [ext, known] of Object.entries(MIME_BY_EXT)) {
+    if (known === base) return ext;
+  }
+  return EXT_BY_MIME_ALIAS[base] ?? null;
+}
+
 /**
  * Android application id. Mirrors ANDROID_PACKAGE in app.config.ts (a Jest
  * test keeps them in sync); it is part of the app's private storage paths.

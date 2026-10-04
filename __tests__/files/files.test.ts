@@ -137,7 +137,7 @@ describe('toNewFile', () => {
 
 describe('native wrappers', () => {
   it('reads the api version and all-files access', () => {
-    expect(getFileIndexApiVersion()).toBe(2);
+    expect(getFileIndexApiVersion()).toBe(3);
     native.hasAllFilesAccess.mockReturnValueOnce(false);
     expect(hasAllFilesAccess()).toBe(false);
   });

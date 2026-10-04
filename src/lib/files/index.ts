@@ -1,19 +1,34 @@
 import FileIndexModule, {
   type CachedContent,
   type FileStat,
+  type PickedDocument,
   type ScannedFile,
 } from '../../../modules/file-index/src/FileIndexModule';
 import { toAppError } from '@/lib/errors';
 
-export type { CachedContent, FileStat, ScannedFile };
+export type { CachedContent, FileStat, PickedDocument, ScannedFile };
+export {
+  useAllFilesAccess,
+  useAllFilesAccessStore,
+  type AllFilesAccess,
+  type AllFilesAccessState,
+} from './access';
 export {
   APP_PACKAGE,
   DEFAULT_SCAN_EXTS,
   SCANS_DIR_NAME,
   classifySource,
+  extForMime,
   mimeForExt,
   toNewFile,
 } from './classify';
+export {
+  DEFAULT_PICK_MIME_TYPES,
+  listPersistedUris,
+  pickDocuments,
+  releasePersistedUri,
+  type PickDocumentsOptions,
+} from './picker';
 export {
   scanDocuments,
   type ScanDocumentsOptions,

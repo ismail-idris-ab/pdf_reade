@@ -47,3 +47,17 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `units.gigabyte` | GB | GB | Go | T0.6 |
 | `language.title` | Language | Harshe | Langue | T0.6 |
 | `language.system` | Use phone language | Yi amfani da harshen waya | Utiliser la langue du téléphone | T0.6 |
+| `onboarding.title` | Your documents, ready when you are | Takardunka, a shirye duk lokacin da kake so | Vos documents, prêts quand vous l’êtes | T1.2 |
+| `onboarding.valueTools` | Read, scan and compress PDFs in one app | Karanta, yi sikan kuma rage girman PDF a manhaja ɗaya | Lisez, numérisez et compressez vos PDF dans une seule application | T1.2 |
+| `onboarding.valuePrivate` | Works offline. Your files stay on your phone | Yana aiki ba tare da intanet ba. Fayilolinka suna nan a wayarka | Fonctionne hors ligne. Vos fichiers restent sur votre téléphone | T1.2 |
+| `onboarding.valueNoAds` | No ads while you read | Babu talla yayin da kake karantawa | Aucune publicité pendant la lecture | T1.2 |
+| `onboarding.allowAccess` | Allow access to find all documents | Ba da izini don nemo duk takardu | Autoriser l’accès pour trouver tous les documents | T1.2 |
+| `onboarding.allowAccessHint` | Opens Settings. You can change this at any time. | Yana buɗe Saituna. Za ka iya canza wannan a kowane lokaci. | Ouvre les Paramètres. Vous pouvez modifier ce choix à tout moment. | T1.2 |
+| `onboarding.pickFiles` | Pick files manually | Zaɓi fayiloli da kanka | Choisir des fichiers manuellement | T1.2 |
+| `onboarding.manualNote` | Everything works without access. You can pick files yourself. | Komai yana aiki ba tare da izini ba. Za ka iya zaɓar fayiloli da kanka. | Tout fonctionne sans cet accès. Vous pouvez choisir vos fichiers vous-même. | T1.2 |
+| `access.bannerMessage` | Allow access so the app can find all your documents automatically. | Ba da izini domin manhajar ta nemo duk takardunka kai tsaye. | Autorisez l’accès pour que l’application trouve automatiquement tous vos documents. | T1.2 |
+| `access.allow` | Allow access | Ba da izini | Autoriser l’accès | T1.2 |
+| `library.untitled` | Untitled document | Takarda marar suna | Document sans titre | T1.2 |
+| `common.errorToast` | {{title}}. {{message}} | {{title}}. {{message}} | {{title}}. {{message}} | T1.2 |
+| `library.evictedOldPicks` | To make room, older picked files were removed from your library ({{count}}). Pick them again to get them back. | Don samar da wuri, an cire tsofaffin fayilolin da ka zaɓa daga ɗakin karatu ({{count}}). Ka sake zaɓar su don dawo da su. | Pour faire de la place, d’anciens fichiers choisis ont été retirés de la bibliothèque ({{count}}). Choisissez-les à nouveau pour les récupérer. | T1.2 |
+| `library.cannotKeepAccess` | Some files couldn’t be added: their source app doesn’t allow lasting access. Try saving them to your phone first. | Ba a iya ƙara wasu fayiloli ba: manhajar da suka fito ba ta ba da izini na dindindin. Ka gwada ajiye su a wayarka da farko. | Certains fichiers n’ont pas pu être ajoutés : leur application d’origine n’autorise pas un accès durable. Essayez d’abord de les enregistrer sur votre téléphone. | T1.2 |

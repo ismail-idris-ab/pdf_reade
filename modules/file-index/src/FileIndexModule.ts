@@ -59,6 +59,29 @@ export type CachedContent = {
   mime: string | null;
 };
 
+export type PickDocumentsOptions = {
+  /** MIME types the system picker offers, e.g. `application/pdf`. */
+  mimeTypes: string[];
+  multiple: boolean;
+};
+
+/**
+ * A document chosen in the system picker (Storage Access Framework). Provider
+ * metadata may be missing; `mtime` is epoch milliseconds.
+ */
+export type PickedDocument = {
+  uri: string;
+  name: string | null;
+  size: number | null;
+  mime: string | null;
+  mtime: number | null;
+  /**
+   * Whether a persistable read permission is held for `uri`. False when the
+   * provider refused it: the URI is readable only for now.
+   */
+  persisted: boolean;
+};
+
 export type FileIndexEvents = {
   onScanBatch: (event: ScanBatchEvent) => void;
   onScanComplete: (event: ScanCompleteEvent) => void;
@@ -75,6 +98,15 @@ declare class FileIndexNativeModule extends NativeModule<FileIndexEvents> {
   stat(path: string): Promise<FileStat>;
   copyContentUriToCache(uri: string): Promise<CachedContent>;
   share(paths: string[], mime: string): Promise<void>;
+  /**
+   * Resolves with an empty list when the user cancels. A new call rejects a
+   * still-pending one with CANCELLED.
+   */
+  pickDocuments(options: PickDocumentsOptions): Promise<PickedDocument[]>;
+  /** content:// URIs the app still holds a persisted permission for. */
+  listPersistedUris(): string[];
+  /** Gives up the persisted permission for a URI. Never throws. */
+  releasePersistedUri(uri: string): void;
 }
 
 export default requireNativeModule<FileIndexNativeModule>('FileIndex');

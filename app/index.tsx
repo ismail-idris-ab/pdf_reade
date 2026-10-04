@@ -2,7 +2,9 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AccessBanner } from '@/components/AccessBanner';
 import { Button } from '@/components/ui';
 import { getPdfEngineApiVersion, runSpikeMerge, runSpikeRender } from '@/lib/engine';
 import { getFileIndexApiVersion } from '@/lib/files';
@@ -10,25 +12,32 @@ import { getSecureVaultApiVersion } from '@/lib/vault';
 
 export default function HomeScreen() {
   const appName = Constants.expoConfig?.name ?? '';
+  const insets = useSafeAreaInsets();
 
   return (
-    <View className="flex-1 items-center justify-center bg-background">
-      <Text className="text-2xl font-semibold text-foreground">{appName}</Text>
-      {__DEV__ ? (
-        <>
-          <Text className="mt-2 text-xs text-muted">
-            {`pdf-engine v${getPdfEngineApiVersion()} · file-index v${getFileIndexApiVersion()} · secure-vault v${getSecureVaultApiVersion()}`}
-          </Text>
-          <EngineSpikePanel />
-          <View className="mt-4">
-            <Button
-              label="Design system"
-              variant="secondary"
-              onPress={() => router.push('/dev/design')}
-            />
-          </View>
-        </>
-      ) : null}
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+      {/* T1.3 moves this banner into the library screen. */}
+      <View className="px-4 pt-4">
+        <AccessBanner />
+      </View>
+      <View className="flex-1 items-center justify-center">
+        <Text className="text-2xl font-semibold text-foreground">{appName}</Text>
+        {__DEV__ ? (
+          <>
+            <Text className="mt-2 text-xs text-muted">
+              {`pdf-engine v${getPdfEngineApiVersion()} · file-index v${getFileIndexApiVersion()} · secure-vault v${getSecureVaultApiVersion()}`}
+            </Text>
+            <EngineSpikePanel />
+            <View className="mt-4">
+              <Button
+                label="Design system"
+                variant="secondary"
+                onPress={() => router.push('/dev/design')}
+              />
+            </View>
+          </>
+        ) : null}
+      </View>
     </View>
   );
 }

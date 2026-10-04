@@ -162,3 +162,63 @@ describe('toFtsQuery', () => {
     expect(toFtsQuery('-- ()')).toBeNull();
   });
 });
+
+describe('files repository batch writes', () => {
+  const at = (name: string, overrides: Partial<NewFile> = {}) =>
+    newFile({ path: `/storage/emulated/0/Download/${name}`, name, ...overrides });
+
+  it('upsertMany writes every row and returns them in order', () => {
+    const repos = setup();
+    repos.files.upsert(at('b.pdf', { size: 1 }));
+    const rows = repos.files.upsertMany([at('a.pdf'), at('b.pdf', { size: 2 })]);
+    expect(rows.map((row) => row.name)).toEqual(['a.pdf', 'b.pdf']);
+    expect(repos.files.getByPath(at('b.pdf').path)?.size).toBe(2);
+    expect(repos.files.upsertMany([])).toEqual([]);
+  });
+
+  it('upsertMany is atomic: one bad row writes nothing', () => {
+    const repos = setup();
+    const bad = at('bad.pdf', { source: 'bogus' as NewFile['source'] });
+    expect(() => repos.files.upsertMany([at('a.pdf'), bad, at('c.pdf')])).toThrow();
+    expect(repos.files.listIndexEntries()).toEqual([]);
+  });
+
+  it('removeByPaths deletes known paths, ignores unknown ones and cascades', () => {
+    const repos = setup();
+    const a = repos.files.upsert(at('a.pdf'));
+    repos.files.upsert(at('b.pdf'));
+    repos.bookmarks.add(a.id, 1, null, 1);
+    expect(repos.files.removeByPaths([a.path, '/nope.pdf'])).toBe(1);
+    expect(repos.files.getByPath(a.path)).toBeUndefined();
+    expect(repos.files.getByPath(at('b.pdf').path)).toBeDefined();
+    expect(repos.bookmarks.listForFile(a.id)).toEqual([]);
+    expect(repos.files.removeByPaths([])).toBe(0);
+  });
+
+  it('removeByPaths handles more paths than one SQL statement can bind', () => {
+    const repos = setup();
+    const rows = Array.from({ length: 1_200 }, (_, i) => at(`f${i}.pdf`));
+    repos.files.upsertMany(rows);
+    expect(repos.files.removeByPaths(rows.map((row) => row.path))).toBe(1_200);
+    expect(repos.files.listIndexEntries()).toEqual([]);
+  });
+
+  it('lists content:// rows least recently used first', () => {
+    const repos = setup();
+    const uri = (id: string, mtime: number) =>
+      newFile({ path: `content://p/${id}`, uri: `content://p/${id}`, mtime, source: 'device' });
+    const openedLate = repos.files.upsert(uri('opened-late', 1));
+    const openedEarly = repos.files.upsert(uri('opened-early', 1));
+    repos.files.upsert(uri('never-new', 50));
+    repos.files.upsert(uri('never-old', 10));
+    repos.files.upsert(at('a.pdf'));
+    repos.files.markOpened(openedLate.id, 2_000);
+    repos.files.markOpened(openedEarly.id, 1_000);
+    expect(repos.files.listContentUrisByAge().map((row) => row.path)).toEqual([
+      'content://p/never-old',
+      'content://p/never-new',
+      'content://p/opened-early',
+      'content://p/opened-late',
+    ]);
+  });
+});

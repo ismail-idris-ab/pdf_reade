@@ -4,6 +4,7 @@ export const en = {
   common: {
     cancel: 'Cancel',
     close: 'Close',
+    errorToast: '{{title}}. {{message}}',
   },
   errors: {
     PASSWORD_REQUIRED: {
@@ -63,6 +64,27 @@ export const en = {
   language: {
     title: 'Language',
     system: 'Use phone language',
+  },
+  onboarding: {
+    title: 'Your documents, ready when you are',
+    valueTools: 'Read, scan and compress PDFs in one app',
+    valuePrivate: 'Works offline. Your files stay on your phone',
+    valueNoAds: 'No ads while you read',
+    allowAccess: 'Allow access to find all documents',
+    allowAccessHint: 'Opens Settings. You can change this at any time.',
+    pickFiles: 'Pick files manually',
+    manualNote: 'Everything works without access. You can pick files yourself.',
+  },
+  access: {
+    bannerMessage: 'Allow access so the app can find all your documents automatically.',
+    allow: 'Allow access',
+  },
+  library: {
+    untitled: 'Untitled document',
+    evictedOldPicks:
+      'To make room, older picked files were removed from your library ({{count}}). Pick them again to get them back.',
+    cannotKeepAccess:
+      'Some files couldn’t be added: their source app doesn’t allow lasting access. Try saving them to your phone first.',
   },
 } as const;
 

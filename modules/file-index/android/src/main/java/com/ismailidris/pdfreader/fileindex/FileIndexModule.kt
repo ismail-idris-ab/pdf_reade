@@ -1,16 +1,19 @@
 package com.ismailidris.pdfreader.fileindex
 
 import android.Manifest
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.system.ErrnoException
@@ -48,6 +51,8 @@ import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /** Argument of `startScan`. */
 class ScanOptions : Record {
@@ -60,6 +65,17 @@ class ScanOptions : Record {
   val knownMtimes: Map<String, Double> = emptyMap()
 }
 
+/** Argument of `pickDocuments`. */
+class PickOptions : Record {
+  /** MIME types the picker offers; empty means any type. */
+  @Field
+  val mimeTypes: List<String> = emptyList()
+
+  /** Whether the user may select several documents. */
+  @Field
+  val multiple: Boolean = false
+}
+
 class FileIndexModule : Module() {
   // Last-resort guard: every launch below catches its own failures, so this
   // only fires on a bug. Logs the exception class only (messages can hold paths).
@@ -68,6 +84,14 @@ class FileIndexModule : Module() {
   }
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + uncaughtHandler)
   private val scanCancelFlags = ConcurrentHashMap<String, AtomicBoolean>()
+
+  /** A picker launch waiting for its result. Identity matters: one per call. */
+  private class PendingPick(val requestCode: Int, val promise: Promise)
+
+  // Whoever removes a PendingPick from the slot owns settling its promise,
+  // so each promise is settled exactly once.
+  private val pendingPick = PendingSlot<PendingPick>()
+  private val pickSequence = AtomicInteger(0)
 
   private val context: Context
     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
@@ -85,6 +109,7 @@ class FileIndexModule : Module() {
 
     OnDestroy {
       scanCancelFlags.values.forEach { it.set(true) }
+      pendingPick.take()?.promise?.reject(moduleDestroyed())
       scope.cancel()
     }
 
@@ -115,6 +140,24 @@ class FileIndexModule : Module() {
 
     AsyncFunction("share") Coroutine { paths: List<String>, mime: String ->
       share(paths, mime)
+    }
+
+    AsyncFunction("pickDocuments") { options: PickOptions, promise: Promise ->
+      pickDocuments(options, promise)
+    }
+
+    OnActivityResult { _, payload ->
+      if (DocumentPick.isPickRequestCode(payload.requestCode)) {
+        onPickResult(payload.requestCode, payload.resultCode, payload.data)
+      }
+    }
+
+    Function("listPersistedUris") {
+      listPersistedUris()
+    }
+
+    Function("releasePersistedUri") { uri: String ->
+      releasePersistedUri(uri)
     }
   }
 
@@ -487,6 +530,208 @@ class FileIndexModule : Module() {
 
   // endregion
 
+  // region document picker
+
+  /*
+   * Known limitation: process death while the picker is open.
+   * When Android kills the app process while the system picker is in front
+   * (common on 2-3 GB phones), the result is delivered to a freshly created
+   * activity and JS runtime that hold no pending promise, so that pick is
+   * lost and the user has to pick again. Grants for that pick are not
+   * persisted either.
+   * expo-modules-core's registerForActivityResult fallback callback was
+   * evaluated and not used. Its own source says the fallback "is not working"
+   * (DefaultAppContextActivityResultCaller). Its registry also saves its state
+   * only in onHostDestroy, which does not run when the process is killed in
+   * the background. On top of that, ReactHost drops onActivityResult while the
+   * new React context is not ready yet, which is the normal state right after
+   * a cold restart. Recovering the result would need a host-activity hook
+   * outside this module.
+   */
+
+  private fun pickDocuments(options: PickOptions, promise: Promise) {
+    if (!scope.isActive) {
+      promise.reject(moduleDestroyed())
+      return
+    }
+    val pick = PendingPick(DocumentPick.requestCodeFor(pickSequence.getAndIncrement()), promise)
+    // A newer call replaces a pending one, so a result the system never
+    // delivered cannot block picking until restart. The replaced promise is
+    // settled here; its late result, if any, no longer matches a request code.
+    pendingPick.replace(pick)?.promise?.reject(
+      FileIndexException(ErrorCode.CANCELLED, "Replaced by a newer document picker request"),
+    )
+    // OnDestroy may have run between the first check and the claim above.
+    if (!scope.isActive) {
+      if (pendingPick.release(pick)) promise.reject(moduleDestroyed())
+      return
+    }
+    val filter = DocumentPick.typeFilter(options.mimeTypes)
+    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+      addCategory(Intent.CATEGORY_OPENABLE)
+      type = filter.type
+      filter.extraMimeTypes?.let { putExtra(Intent.EXTRA_MIME_TYPES, it.toTypedArray()) }
+      putExtra(Intent.EXTRA_ALLOW_MULTIPLE, options.multiple)
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+    }
+    // If the scope is cancelled before this runs, OnDestroy has already
+    // rejected the pending promise.
+    scope.launch(Dispatchers.Main) {
+      val failure: CodedException? = try {
+        val activity = appContext.currentActivity
+        if (activity == null) {
+          CodedException(ERR_NO_ACTIVITY, "No screen is available to show the document picker", null)
+        } else {
+          activity.startActivityForResult(intent, pick.requestCode)
+          null
+        }
+      } catch (e: ActivityNotFoundException) {
+        CodedException(ERR_NO_PICKER, "No document picker is available", e)
+      } catch (_: Throwable) {
+        CodedException(ERR_PICK_FAILED, "Could not open the document picker", null)
+      }
+      // release: if OnDestroy or a newer call already settled it, do nothing.
+      if (failure != null && pendingPick.release(pick)) {
+        promise.reject(failure)
+      }
+    }
+  }
+
+  /** Called on the main thread when a picker returns. */
+  private fun onPickResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    // A result for a replaced launch is ignored: its promise is already settled.
+    val promise = pendingPick.takeIf { it.requestCode == requestCode }?.promise ?: return
+    if (resultCode != Activity.RESULT_OK || data == null) {
+      promise.resolve(emptyList<Map<String, Any?>>())
+      return
+    }
+    val clip = data.clipData
+    val clipUris = if (clip == null) {
+      emptyList()
+    } else {
+      (0 until clip.itemCount).map { clip.getItemAt(it).uri?.toString() }
+    }
+    val uris = DocumentPick.collectUris(clipUris, data.data?.toString())
+    if (uris.isEmpty()) {
+      promise.resolve(emptyList<Map<String, Any?>>())
+      return
+    }
+    if (!scope.isActive) {
+      promise.reject(moduleDestroyed())
+      return
+    }
+    // Settled by whichever side takes it first: the job body, or the
+    // completion handler when the scope is cancelled (OnDestroy) first.
+    val owner = AtomicReference<Promise?>(promise)
+    val job = scope.launch {
+      try {
+        val resolver = context.contentResolver
+        val items = uris.map { describePicked(resolver, it) }
+        owner.getAndSet(null)?.resolve(items)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: CodedException) {
+        owner.getAndSet(null)?.reject(e)
+      } catch (_: Throwable) {
+        owner.getAndSet(null)?.reject(CodedException(ERR_PICK_FAILED, "Could not read the picked documents", null))
+      }
+    }
+    job.invokeOnCompletion { owner.getAndSet(null)?.reject(moduleDestroyed()) }
+  }
+
+  /**
+   * Tries to persist the read grant and reads the provider metadata of one
+   * picked document. The item's `persisted` field is false when the provider
+   * offered no persistable grant: the URI then works only in this session.
+   * Metadata the provider refuses or lacks is returned as null.
+   */
+  private fun describePicked(resolver: ContentResolver, uriString: String): Map<String, Any?> {
+    val uri = uriString.toUri()
+    val persisted = try {
+      resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      true
+    } catch (_: SecurityException) {
+      false
+    }
+    val mime = try {
+      resolver.getType(uri)
+    } catch (_: SecurityException) {
+      null
+    } catch (_: IllegalArgumentException) {
+      null
+    }
+    val meta = queryPickedMetadata(resolver, uri)
+    return DocumentPick.pickedDocument(uriString, meta.name, meta.size, mime, meta.mtime, persisted)
+  }
+
+  private class PickedMetadata(val name: String?, val size: Long?, val mtime: Long?)
+
+  private fun queryPickedMetadata(resolver: ContentResolver, uri: Uri): PickedMetadata {
+    val empty = PickedMetadata(null, null, null)
+    val withMtime = arrayOf(
+      OpenableColumns.DISPLAY_NAME,
+      OpenableColumns.SIZE,
+      DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+    )
+    val basic = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+    return try {
+      val cursor = try {
+        resolver.query(uri, withMtime, null, null, null)
+      } catch (_: IllegalArgumentException) {
+        // Provider rejects the last-modified column: retry without it.
+        resolver.query(uri, basic, null, null, null)
+      }
+      cursor?.use {
+        if (it.moveToFirst()) {
+          PickedMetadata(
+            name = it.stringOrNull(OpenableColumns.DISPLAY_NAME),
+            size = it.longOrNull(OpenableColumns.SIZE),
+            mtime = it.longOrNull(DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+          )
+        } else {
+          null
+        }
+      } ?: empty
+    } catch (_: SecurityException) {
+      empty
+    } catch (_: IllegalArgumentException) {
+      empty
+    } catch (_: UnsupportedOperationException) {
+      empty
+    }
+  }
+
+  private fun Cursor.stringOrNull(column: String): String? {
+    val index = getColumnIndex(column)
+    return if (index >= 0 && !isNull(index)) getString(index) else null
+  }
+
+  private fun Cursor.longOrNull(column: String): Long? {
+    val index = getColumnIndex(column)
+    return if (index >= 0 && !isNull(index)) getLong(index) else null
+  }
+
+  private fun listPersistedUris(): List<String> =
+    DocumentPick.readGranted(
+      context.contentResolver.persistedUriPermissions.map { it.uri.toString() to it.isReadPermission },
+    )
+
+  /** Releases a persisted read grant; a grant that is not held is ignored. */
+  private fun releasePersistedUri(uriString: String) {
+    try {
+      context.contentResolver.releasePersistableUriPermission(
+        uriString.toUri(),
+        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+      )
+    } catch (_: SecurityException) {
+      // Not held: already released or never granted.
+    } catch (_: IllegalArgumentException) {
+      // Not a URI the resolver accepts: nothing to release.
+    }
+  }
+
+  // endregion
+
   // region io helpers
 
   /** Removes staging folders older than [STAGING_TTL_MS]; best effort. */
@@ -547,7 +792,7 @@ class FileIndexModule : Module() {
   // endregion
 
   companion object {
-    const val API_VERSION = 2
+    const val API_VERSION = 3
 
     private const val TAG = "FileIndex"
 
@@ -568,5 +813,8 @@ class FileIndexModule : Module() {
     private const val ERR_IMPORT_FAILED = "ERR_IMPORT_FAILED"
     private const val ERR_SHARE_FAILED = "ERR_SHARE_FAILED"
     private const val ERR_MODULE_DESTROYED = "ERR_MODULE_DESTROYED"
+    private const val ERR_NO_ACTIVITY = "ERR_NO_ACTIVITY"
+    private const val ERR_NO_PICKER = "ERR_NO_PICKER"
+    private const val ERR_PICK_FAILED = "ERR_PICK_FAILED"
   }
 }

@@ -13,7 +13,9 @@ import { ErrorScreen } from '@/components/ErrorScreen';
 import { ToastHost } from '@/components/ui';
 import { getDatabase, getRepositories } from '@/db/client';
 import migrations from '@/db/migrations/migrations';
+import { useOnboardingStore } from '@/features/onboarding/store';
 import { useDeviceLocaleSync } from '@/i18n';
+import { useLibraryMaintenance } from '@/lib/library/useLibraryMaintenance';
 import { ThemeProvider, useTheme } from '@/theme';
 
 // Keep the splash screen up until the database is migrated.
@@ -49,14 +51,34 @@ export default function RootLayout() {
   );
 }
 
+// Rendered only after migrations succeed, so repositories are safe to use.
 function ThemedStack() {
   const { palette } = useTheme();
+  const onboardingComplete = useOnboardingStore((state) => state.onboardingComplete);
+  useLibraryMaintenance(onboardingComplete);
+
+  // Protected routes.
+  // - Behind onboarding: index (home). Every app route added later must go
+  //   inside the first Protected group too.
+  // - Before onboarding only: onboarding.
+  // - Unguarded: dev/* (design gallery), intentionally reachable at any time
+  //   in dev builds; in release builds the screen itself redirects to /.
+  // When the flag flips, expo-router drops the now-protected screen and lands
+  // on the first available one, so there is no redirect to loop on; a deep
+  // link to a protected route lands on the first available route instead.
   return (
     <Stack
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: palette.background },
       }}
-    />
+    >
+      <Stack.Protected guard={onboardingComplete}>
+        <Stack.Screen name="index" />
+      </Stack.Protected>
+      <Stack.Protected guard={!onboardingComplete}>
+        <Stack.Screen name="onboarding" />
+      </Stack.Protected>
+    </Stack>
   );
 }

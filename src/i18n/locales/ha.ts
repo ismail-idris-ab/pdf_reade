@@ -5,6 +5,7 @@ export const ha: Catalog = {
   common: {
     cancel: 'Soke',
     close: 'Rufe',
+    errorToast: '{{title}}. {{message}}',
   },
   errors: {
     PASSWORD_REQUIRED: {
@@ -64,5 +65,26 @@ export const ha: Catalog = {
   language: {
     title: 'Harshe',
     system: 'Yi amfani da harshen waya',
+  },
+  onboarding: {
+    title: 'Takardunka, a shirye duk lokacin da kake so',
+    valueTools: 'Karanta, yi sikan kuma rage girman PDF a manhaja ɗaya',
+    valuePrivate: 'Yana aiki ba tare da intanet ba. Fayilolinka suna nan a wayarka',
+    valueNoAds: 'Babu talla yayin da kake karantawa',
+    allowAccess: 'Ba da izini don nemo duk takardu',
+    allowAccessHint: 'Yana buɗe Saituna. Za ka iya canza wannan a kowane lokaci.',
+    pickFiles: 'Zaɓi fayiloli da kanka',
+    manualNote: 'Komai yana aiki ba tare da izini ba. Za ka iya zaɓar fayiloli da kanka.',
+  },
+  access: {
+    bannerMessage: 'Ba da izini domin manhajar ta nemo duk takardunka kai tsaye.',
+    allow: 'Ba da izini',
+  },
+  library: {
+    untitled: 'Takarda marar suna',
+    evictedOldPicks:
+      'Don samar da wuri, an cire tsofaffin fayilolin da ka zaɓa daga ɗakin karatu ({{count}}). Ka sake zaɓar su don dawo da su.',
+    cannotKeepAccess:
+      'Ba a iya ƙara wasu fayiloli ba: manhajar da suka fito ba ta ba da izini na dindindin. Ka gwada ajiye su a wayarka da farko.',
   },
 };

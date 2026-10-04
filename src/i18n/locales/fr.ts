@@ -5,6 +5,7 @@ export const fr: Catalog = {
   common: {
     cancel: 'Annuler',
     close: 'Fermer',
+    errorToast: '{{title}}. {{message}}',
   },
   errors: {
     PASSWORD_REQUIRED: {
@@ -66,5 +67,27 @@ export const fr: Catalog = {
   language: {
     title: 'Langue',
     system: 'Utiliser la langue du téléphone',
+  },
+  onboarding: {
+    title: 'Vos documents, prêts quand vous l’êtes',
+    valueTools: 'Lisez, numérisez et compressez vos PDF dans une seule application',
+    valuePrivate: 'Fonctionne hors ligne. Vos fichiers restent sur votre téléphone',
+    valueNoAds: 'Aucune publicité pendant la lecture',
+    allowAccess: 'Autoriser l’accès pour trouver tous les documents',
+    allowAccessHint: 'Ouvre les Paramètres. Vous pouvez modifier ce choix à tout moment.',
+    pickFiles: 'Choisir des fichiers manuellement',
+    manualNote: 'Tout fonctionne sans cet accès. Vous pouvez choisir vos fichiers vous-même.',
+  },
+  access: {
+    bannerMessage:
+      'Autorisez l’accès pour que l’application trouve automatiquement tous vos documents.',
+    allow: 'Autoriser l’accès',
+  },
+  library: {
+    untitled: 'Document sans titre',
+    evictedOldPicks:
+      'Pour faire de la place, d’anciens fichiers choisis ont été retirés de la bibliothèque ({{count}}). Choisissez-les à nouveau pour les récupérer.',
+    cannotKeepAccess:
+      'Certains fichiers n’ont pas pu être ajoutés : leur application d’origine n’autorise pas un accès durable. Essayez d’abord de les enregistrer sur votre téléphone.',
   },
 };

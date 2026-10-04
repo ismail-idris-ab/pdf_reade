@@ -6,6 +6,8 @@ import type {
   CachedContent,
   FileIndexEvents,
   FileStat,
+  PickDocumentsOptions,
+  PickedDocument,
   ScanBatchEvent,
   ScanCompleteEvent,
   ScanErrorEvent,
@@ -32,7 +34,7 @@ function createFakeFileIndex() {
   }
 
   return {
-    apiVersion: 2,
+    apiVersion: 3,
     addListener: jest.fn(addListener),
     hasAllFilesAccess: jest.fn<boolean, []>(() => true),
     openAllFilesAccessSettings: jest.fn<Promise<void>, []>(() => Promise.resolve()),
@@ -43,6 +45,11 @@ function createFakeFileIndex() {
     stat: jest.fn<Promise<FileStat>, [string]>(),
     copyContentUriToCache: jest.fn<Promise<CachedContent>, [string]>(),
     share: jest.fn<Promise<void>, [string[], string]>(),
+    pickDocuments: jest.fn<Promise<PickedDocument[]>, [PickDocumentsOptions]>(() =>
+      Promise.resolve([]),
+    ),
+    listPersistedUris: jest.fn<string[], []>(() => []),
+    releasePersistedUri: jest.fn<void, [string]>(),
     emitBatch(event: ScanBatchEvent) {
       for (const listener of [...listeners.onScanBatch]) listener(event);
     },

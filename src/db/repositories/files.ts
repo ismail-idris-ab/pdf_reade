@@ -1,4 +1,4 @@
-import { desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { asc, desc, eq, inArray, isNotNull, like, sql } from 'drizzle-orm';
 
 import { files, type FileSource } from '../schema';
 import type { AppDatabase, FileRow, NewFile } from '../types';
@@ -17,32 +17,83 @@ export function toFtsQuery(input: string): string | null {
   return words.map((word) => `"${word}"*`).join(' ');
 }
 
+/**
+ * Inserts a file or refreshes its metadata if the path is already known.
+ * User state (favorite, last opened) is kept; the cached page count is
+ * cleared when the file changed on disk.
+ */
+function upsertFile(db: AppDatabase, file: NewFile): FileRow {
+  return db
+    .insert(files)
+    .values(file)
+    .onConflictDoUpdate({
+      target: files.path,
+      set: {
+        uri: file.uri,
+        name: file.name,
+        ext: file.ext,
+        mime: file.mime,
+        size: file.size,
+        mtime: file.mtime,
+        source: file.source,
+        pageCount: sql`CASE WHEN ${files.mtime} = excluded.mtime AND ${files.size} = excluded.size THEN ${files.pageCount} ELSE NULL END`,
+      },
+    })
+    .returning()
+    .get();
+}
+
 export function createFilesRepository(db: AppDatabase) {
   return {
-    /**
-     * Inserts a file or refreshes its metadata if the path is already known.
-     * User state (favorite, last opened) is kept; the cached page count is
-     * cleared when the file changed on disk.
-     */
+    /** See upsertFile. */
     upsert(file: NewFile): FileRow {
+      return upsertFile(db, file);
+    },
+
+    /** Upserts all rows in one transaction: all are written, or none. */
+    upsertMany(rows: readonly NewFile[]): FileRow[] {
+      if (rows.length === 0) return [];
+      return db.transaction((tx) => rows.map((row) => upsertFile(tx, row)));
+    },
+
+    /**
+     * Deletes the rows with these paths in one transaction (bookmarks, reading
+     * state and drafts cascade). Unknown paths are ignored. Returns the number
+     * of rows deleted.
+     */
+    removeByPaths(paths: readonly string[]): number {
+      if (paths.length === 0) return 0;
+      return db.transaction((tx) => {
+        let removed = 0;
+        // Chunked to stay under SQLite's bound-parameter limit.
+        for (let start = 0; start < paths.length; start += 500) {
+          const chunk = paths.slice(start, start + 500);
+          removed += tx
+            .delete(files)
+            .where(inArray(files.path, chunk))
+            .returning({ id: files.id })
+            .all().length;
+        }
+        return removed;
+      });
+    },
+
+    /**
+     * Rows whose path is a content:// URI, least recently used first: never
+     * opened before opened, then oldest open, then oldest mtime.
+     */
+    listContentUrisByAge(): Pick<FileRow, 'id' | 'path'>[] {
       return db
-        .insert(files)
-        .values(file)
-        .onConflictDoUpdate({
-          target: files.path,
-          set: {
-            uri: file.uri,
-            name: file.name,
-            ext: file.ext,
-            mime: file.mime,
-            size: file.size,
-            mtime: file.mtime,
-            source: file.source,
-            pageCount: sql`CASE WHEN ${files.mtime} = excluded.mtime AND ${files.size} = excluded.size THEN ${files.pageCount} ELSE NULL END`,
-          },
-        })
-        .returning()
-        .get();
+        .select({ id: files.id, path: files.path })
+        .from(files)
+        .where(like(files.path, 'content://%'))
+        .orderBy(
+          sql`${files.lastOpenedAt} IS NOT NULL`,
+          asc(files.lastOpenedAt),
+          asc(files.mtime),
+          asc(files.id),
+        )
+        .all();
     },
 
     getById(id: number): FileRow | undefined {
@@ -64,6 +115,11 @@ export function createFilesRepository(db: AppDatabase) {
         .limit(limit)
         .offset(offset)
         .all();
+    },
+
+    /** Id, path and mtime of every row (unpaged), for incremental scans and pruning. */
+    listIndexEntries(): Pick<FileRow, 'id' | 'path' | 'mtime'>[] {
+      return db.select({ id: files.id, path: files.path, mtime: files.mtime }).from(files).all();
     },
 
     listRecent(limit = 20): FileRow[] {

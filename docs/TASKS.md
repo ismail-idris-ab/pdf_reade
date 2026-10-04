@@ -38,12 +38,13 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
   `hasAllFilesAccess()`, `openAllFilesAccessSettings()`, `scan({ exts, knownMtimes })` streaming batches via events (skip `Android/data`, `Android/obb`, hidden dirs, >5 levels of symlinks), `stat(path)`, `copyContentUriToCache(uri)`, `share(paths, mime)` via FileProvider with narrowly scoped paths.
   **Done when:** full scan of a device with ~2,000 files completes without blocking UI; incremental rescan only emits changed files.
 
-- [ ] **T1.2 Onboarding + permission flow** `[launch]`
+- [x] **T1.2 Onboarding + permission flow** `[launch]`
   Value-first screen → "Allow access to find all documents" or "Pick files manually". Re-check permission on resume. Library works fully in manual mode (SAF picker, persisted URI permissions).
 
 - [ ] **T1.3 Library screens** `[launch]`
   Tabs: All / PDF / Word / Excel / Other; sections Recent, Favorites. Source chips: All, Downloads, **WhatsApp** (`Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Documents`), Scans, My Files. List/grid toggle, sort (name, date, size), name search via FTS. First-page thumbnails rendered by engine, disk-cached with LRU cap (100 MB).
   **Done when:** 2,000-item library scrolls at 60fps on low-end device; thumbnails never block scroll.
+  Note (from T1.2): Dedupe a picked content:// document with the same file later found by the full scan (match on name + size + mtime) so it doesn't appear twice.
 
 - [ ] **T1.4 File actions + folders** `[launch]`
   Rename, move, duplicate, details, favorite, share, print, delete. Until T1.5 (recycle bin, post-launch) ships, delete is permanent and always behind a confirmation dialog naming the file. App-managed "My Files" folder with nested folders + import.
@@ -54,6 +55,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 - [ ] **T1.6 Intents: "Open with" + share target** `[launch]`
   Config plugin adding intent filters: `VIEW` for `application/pdf` and DOCX/XLSX/CSV/TXT MIME types; `SEND` / `SEND_MULTIPLE` for PDFs and images (images → Image-to-PDF flow). Handle cold and warm starts.
   **Done when:** opening a PDF from WhatsApp and a file manager lands directly in the reader; sharing 5 images from Gallery opens Image-to-PDF prefilled.
+  Note (from T1.2): every content:// row in the `files` table must hold a persisted URI grant. Transient "Open with"/share URIs must be copied into the cache (`copyContentUriToCache`) and stored by file path, never by URI, so `prunePickedDocuments` stays safe.
 
 - [ ] **T1.7 Settings screen** `[launch]`
   One screen collecting app-wide settings built elsewhere: Theme (T0.3 `THEME_PREFERENCES`), Language (mounts `LanguagePicker` from T0.6), Open-source licences (T7.5), Analytics opt-out (T6.4), Send crash reports (T6.6), app version. Reachable from the library header.
