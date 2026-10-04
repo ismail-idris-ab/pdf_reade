@@ -16,6 +16,8 @@ import {
   ProgressSheet,
   toast,
 } from '@/components/ui';
+import { LanguagePicker } from '@/components/LanguagePicker';
+import { useFormatFileSize, useLocaleStore, useTranslation } from '@/i18n';
 import { THEME_PREFERENCES, useTheme } from '@/theme';
 
 export default function DesignGallery() {
@@ -46,6 +48,10 @@ function Gallery() {
   const [dialog, setDialog] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [crash, setCrash] = useState(false);
+  const [languages, setLanguages] = useState(false);
+  const { i18n } = useTranslation();
+  const localePreference = useLocaleStore((state) => state.preference);
+  const formatFileSize = useFormatFileSize();
 
   // Simulated operation: +10% every 300ms, then close with a toast.
   useEffect(() => {
@@ -80,6 +86,15 @@ function Gallery() {
               onPress={() => setPreference(option)}
             />
           ))}
+        </View>
+      </Section>
+
+      <Section title={`Language: ${i18n.language} (preference: ${localePreference})`}>
+        <View className="flex-row flex-wrap items-center gap-3 px-4">
+          <Button label="Choose language" variant="secondary" onPress={() => setLanguages(true)} />
+          <Text className="text-base text-foreground">
+            {[0, 950, 180_000, 1_536_000, 2_400_000_000].map(formatFileSize).join(' · ')}
+          </Text>
         </View>
       </Section>
 
@@ -170,6 +185,8 @@ function Gallery() {
           />
         </View>
       </Section>
+
+      <LanguagePicker visible={languages} onClose={() => setLanguages(false)} />
 
       <BottomSheet visible={sheet} onClose={() => setSheet(false)} title="Share">
         <ListItem title="Send as PDF" onPress={() => setSheet(false)} />

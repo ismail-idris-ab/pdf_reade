@@ -1,3 +1,5 @@
+import { i18n } from '@/i18n';
+
 import type { AppErrorCode } from './codes';
 
 /** What the screen should offer the user after an error. */
@@ -10,74 +12,29 @@ export type UserMessage = {
   recovery: RecoveryAction;
 };
 
-// English copy. T0.6 moves these strings into the i18n catalogue
-// (keys `errors.<CODE>.title` / `.message`) without changing this shape.
-const MESSAGES: Record<AppErrorCode, UserMessage> = {
-  PASSWORD_REQUIRED: {
-    title: 'This file is password-protected',
-    message: 'Enter the password to open it.',
-    recovery: 'enterPassword',
-  },
-  WRONG_PASSWORD: {
-    title: 'Wrong password',
-    message: 'That password did not work. Check it and try again.',
-    recovery: 'enterPassword',
-  },
-  CORRUPT_FILE: {
-    title: 'This file is damaged',
-    message: 'It may not have downloaded completely. Try getting the file again.',
-    recovery: 'pickAnotherFile',
-  },
-  UNSUPPORTED: {
-    title: "This file type isn't supported",
-    message: 'Try opening a PDF, image or Office document instead.',
-    recovery: 'pickAnotherFile',
-  },
-  NO_SPACE: {
-    title: 'Your phone is out of storage',
-    message: 'Free up some space, then try again.',
-    recovery: 'freeSpace',
-  },
-  OUT_OF_MEMORY: {
-    title: 'This file is too large to handle right now',
-    message: 'Close other apps and try again.',
-    recovery: 'retry',
-  },
-  CANCELLED: {
-    title: 'Cancelled',
-    message: 'Nothing was changed.',
-    recovery: 'none',
-  },
-  PERMISSION_DENIED: {
-    title: 'Permission needed',
-    message: 'Allow access in Settings so the app can open your documents.',
-    recovery: 'openSettings',
-  },
-  NOT_FOUND: {
-    title: 'File not found',
-    message: 'It may have been moved or deleted.',
-    recovery: 'pickAnotherFile',
-  },
-  UNKNOWN: {
-    title: 'Something went wrong',
-    message: 'Please try again.',
-    recovery: 'retry',
-  },
+const RECOVERY: Record<AppErrorCode, RecoveryAction> = {
+  PASSWORD_REQUIRED: 'enterPassword',
+  WRONG_PASSWORD: 'enterPassword',
+  CORRUPT_FILE: 'pickAnotherFile',
+  UNSUPPORTED: 'pickAnotherFile',
+  NO_SPACE: 'freeSpace',
+  OUT_OF_MEMORY: 'retry',
+  CANCELLED: 'none',
+  PERMISSION_DENIED: 'openSettings',
+  NOT_FOUND: 'pickAnotherFile',
+  UNKNOWN: 'retry',
 };
 
+/** Human message in the current language plus the recovery to offer. */
 export function toUserMessage(code: AppErrorCode): UserMessage {
-  return MESSAGES[code];
+  return {
+    title: i18n.t(`errors.${code}.title`),
+    message: i18n.t(`errors.${code}.message`),
+    recovery: RECOVERY[code],
+  };
 }
 
-const RECOVERY_LABELS: Record<Exclude<RecoveryAction, 'none'>, string> = {
-  retry: 'Try again',
-  enterPassword: 'Enter password',
-  freeSpace: 'Free up space',
-  openSettings: 'Open Settings',
-  pickAnotherFile: 'Choose another file',
-};
-
-/** Button label for a recovery action. */
+/** Button label for a recovery action, in the current language. */
 export function toRecoveryLabel(action: Exclude<RecoveryAction, 'none'>): string {
-  return RECOVERY_LABELS[action];
+  return i18n.t(`recovery.${action}`);
 }

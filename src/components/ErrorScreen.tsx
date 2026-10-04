@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui';
+import { useTranslation } from '@/i18n';
 import { reportError } from '@/lib/crash';
 import { toAppError, toRecoveryLabel, toUserMessage } from '@/lib/errors';
 import { ThemeProvider } from '@/theme';
@@ -19,6 +20,9 @@ export type ErrorScreenProps = {
  * Retry remounts the layout, which also reruns database migrations.
  */
 export function ErrorScreen({ error, retry }: ErrorScreenProps) {
+  // Subscribes to language changes so the copy below re-renders.
+  useTranslation();
+
   useEffect(() => {
     reportError(error);
     // The layout threw before it could hide the splash screen.

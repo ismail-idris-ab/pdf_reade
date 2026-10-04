@@ -8,6 +8,11 @@ export type ListItemProps = {
   trailing?: ReactNode;
   onPress?: () => void;
   onLongPress?: () => void;
+  /**
+   * Makes the row an option in a single-choice list: announced by TalkBack as
+   * a radio button, checked when true.
+   */
+  selected?: boolean;
   /** Defaults to the title and subtitle. */
   accessibilityLabel?: string;
   testID?: string;
@@ -20,6 +25,7 @@ export function ListItem({
   trailing,
   onPress,
   onLongPress,
+  selected,
   accessibilityLabel,
   testID,
 }: ListItemProps) {
@@ -39,8 +45,9 @@ export function ListItem({
   return (
     <Pressable
       testID={testID}
-      accessibilityRole="button"
+      accessibilityRole={selected === undefined ? 'button' : 'radio'}
       accessibilityLabel={label}
+      accessibilityState={selected === undefined ? undefined : { checked: selected }}
       onPress={onPress}
       onLongPress={onLongPress}
       className={`${rowClass} active:bg-surface`}

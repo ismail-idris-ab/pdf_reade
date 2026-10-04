@@ -52,6 +52,9 @@ Only permissive licences are allowed, with their notice/credit requirements hono
 | @sentry/babel-plugin-component-annotate (transitive) | 4.8.0 | MIT | node_modules/@sentry/babel-plugin-component-annotate/package.json | T0.4 |
 | io.sentry:sentry-android (+ core, ndk, replay) | 8.31.0 | MIT | Maven Central POM `licenses` | T0.4 |
 | @sentry/cli (transitive, build-time upload tool only, not shipped in the app) | 2.58.4 | FSL-1.1-MIT (source-available; becomes MIT after 2 years) | node_modules/@sentry/cli/package.json — **owner decision needed**, see note | T0.4 |
+| expo-localization | 57.0.2 | MIT | node_modules/expo-localization/package.json | T0.6 |
+| i18next | 26.4.2 | MIT | node_modules/i18next/package.json | T0.6 |
+| react-i18next | 17.0.15 | MIT | node_modules/react-i18next/package.json | T0.6 |
 
 ## Transitive dependency notes
 

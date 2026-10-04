@@ -29,7 +29,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 - [x] **T0.5 CI** `[launch]`
   GitHub Actions: install, `tsc --noEmit`, lint, Jest on every push.
 
-- [ ] **T0.6 i18n** `[launch]`
+- [x] **T0.6 i18n** `[launch]`
   i18next + expo-localization. Locales: `en`, `ha` (Hausa), `fr`. Typed translation keys (missing key = type error). In-app language switcher overriding device locale. `ha` and `fr` are hidden from the switcher and ignored as device locales unless the `enabledLocales` config flag includes them (launch config: `["en"]`). Every new `ha`/`fr` string is logged in `docs/TRANSLATIONS_TO_REVIEW.md`. Number/size formatting per locale (KB/MB).
 
 ## Phase 1 — File access & library
@@ -54,6 +54,10 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 - [ ] **T1.6 Intents: "Open with" + share target** `[launch]`
   Config plugin adding intent filters: `VIEW` for `application/pdf` and DOCX/XLSX/CSV/TXT MIME types; `SEND` / `SEND_MULTIPLE` for PDFs and images (images → Image-to-PDF flow). Handle cold and warm starts.
   **Done when:** opening a PDF from WhatsApp and a file manager lands directly in the reader; sharing 5 images from Gallery opens Image-to-PDF prefilled.
+
+- [ ] **T1.7 Settings screen** `[launch]`
+  One screen collecting app-wide settings built elsewhere: Theme (T0.3 `THEME_PREFERENCES`), Language (mounts `LanguagePicker` from T0.6), Open-source licences (T7.5), Analytics opt-out (T6.4), Send crash reports (T6.6), app version. Reachable from the library header.
+  **Done when:** theme and language changes apply immediately and survive a restart; with `enabledLocales: ["en"]` the language list shows only "Use phone language" and English.
 
 ## Phase 2 — Reader (the core; don't rush it)
 

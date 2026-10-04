@@ -77,6 +77,11 @@ const config: ExpoConfig = {
     ],
     ...sentryPlugin,
   ],
+  extra: {
+    // Locales users can see. ha/fr stay off until a paid native-speaker
+    // review clears docs/TRANSLATIONS_TO_REVIEW.md (CLAUDE.md).
+    enabledLocales: ['en'],
+  },
   experiments: {
     typedRoutes: true,
   },
