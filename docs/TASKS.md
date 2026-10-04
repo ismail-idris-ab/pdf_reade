@@ -26,7 +26,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 - [x] **T0.4 Errors + crash reporting** `[launch]`
   Shared error codes (see CLAUDE.md), `toUserMessage(code)`, global error boundary, Sentry init with PII scrubbing (strip file paths/names from breadcrumbs).
 
-- [ ] **T0.5 CI** `[launch]`
+- [x] **T0.5 CI** `[launch]`
   GitHub Actions: install, `tsc --noEmit`, lint, Jest on every push.
 
 - [ ] **T0.6 i18n** `[launch]`
