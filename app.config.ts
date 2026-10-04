@@ -2,6 +2,26 @@ import type { ExpoConfig } from 'expo/config';
 
 const ANDROID_PACKAGE = 'com.ismailidris.pdfreader';
 
+// Sentry's config plugin only uploads source maps and debug symbols. It is
+// added when an auth token is present (EAS release builds with the secret
+// set); without one, local release builds would fail at the upload step.
+// Crash capture itself works without the plugin (see src/lib/crash).
+const SENTRY_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN;
+const SENTRY_ORG = process.env.SENTRY_ORG;
+const SENTRY_PROJECT = process.env.SENTRY_PROJECT;
+if (SENTRY_AUTH_TOKEN && (!SENTRY_ORG || !SENTRY_PROJECT)) {
+  throw new Error('SENTRY_AUTH_TOKEN is set, so SENTRY_ORG and SENTRY_PROJECT are required');
+}
+const sentryPlugin: [string, Record<string, string>][] =
+  SENTRY_AUTH_TOKEN && SENTRY_ORG && SENTRY_PROJECT
+    ? [
+        [
+          '@sentry/react-native/expo',
+          { url: 'https://sentry.io/', organization: SENTRY_ORG, project: SENTRY_PROJECT },
+        ],
+      ]
+    : [];
+
 const config: ExpoConfig = {
   name: 'Pdf Reader',
   slug: 'pdf-reader',
@@ -55,6 +75,7 @@ const config: ExpoConfig = {
         },
       },
     ],
+    ...sentryPlugin,
   ],
   experiments: {
     typedRoutes: true,

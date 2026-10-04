@@ -47,6 +47,11 @@ Only permissive licences are allowed, with their notice/credit requirements hono
 | zustand | 5.0.15 | MIT | node_modules/zustand/package.json | T0.3 |
 | @testing-library/react-native (dev) | 14.0.1 | MIT | node_modules/@testing-library/react-native/package.json | T0.3 |
 | test-renderer (dev, RNTL peer) | 1.3.0 | MIT | node_modules/test-renderer/package.json | T0.3 |
+| @sentry/react-native | 7.11.0 | MIT | node_modules/@sentry/react-native/package.json | T0.4 |
+| @sentry/core, @sentry/react, @sentry/browser, @sentry/types (transitive) | 10.37.0 | MIT | node_modules/@sentry/*/package.json | T0.4 |
+| @sentry/babel-plugin-component-annotate (transitive) | 4.8.0 | MIT | node_modules/@sentry/babel-plugin-component-annotate/package.json | T0.4 |
+| io.sentry:sentry-android (+ core, ndk, replay) | 8.31.0 | MIT | Maven Central POM `licenses` | T0.4 |
+| @sentry/cli (transitive, build-time upload tool only, not shipped in the app) | 2.58.4 | FSL-1.1-MIT (source-available; becomes MIT after 2 years) | node_modules/@sentry/cli/package.json — **owner decision needed**, see note | T0.4 |
 
 ## Transitive dependency notes
 
@@ -76,3 +81,7 @@ The prebuilt `libpdfium.so` statically links the components below. Their licence
 **Decision (2026-10-03, owner):** the rule was widened from "Apache-2.0 / MIT / BSD only" to "permissive licences, with their notice requirements honoured", so FTL, IJG, zlib, libpng, Unicode v3, AGG and the Bouncy Castle Licence are allowed. GPL, LGPL and AGPL stay rejected. The FreeType and IJG credit lines above, and every licence text in the PDFium archive's `licenses/` folder, must appear on the in-app open-source notices screen before release.
 
 PdfBox-Android also bundles Apache PDFBox's data files: Adobe AFM metrics for the standard 14 fonts, Adobe CMaps and glyph lists, and Unicode data files. Apache PDFBox documents these as permissively licensed. Re-check them against the PDFBox 2.0.27 `LICENSE.txt` before release (needs human verification).
+
+## Sentry CLI licence (T0.4)
+
+`@sentry/cli` is pulled in by `@sentry/react-native` as the tool that uploads source maps and debug symbols at build time. It is licensed under FSL-1.1-MIT (Functional Source License): source-available, with a non-compete restriction, converting to MIT two years after each release. It is never bundled into the app and only runs when `SENTRY_AUTH_TOKEN` is set (see `app.config.ts`). Using it as a build tool for our own app does not compete with Sentry, so the restriction should not apply — but FSL is not a permissive licence, so this needs an explicit owner decision (needs human verification).

@@ -23,7 +23,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 - [x] **T0.3 Design system** `[launch]`
   Theme tokens (light / dark / sepia), persisted color scheme, primitives: Button, IconButton, ListItem, BottomSheet, Dialog, Toast, EmptyState, ProgressSheet (with cancel). Accessible touch targets ≥ 48dp.
 
-- [ ] **T0.4 Errors + crash reporting** `[launch]`
+- [x] **T0.4 Errors + crash reporting** `[launch]`
   Shared error codes (see CLAUDE.md), `toUserMessage(code)`, global error boundary, Sentry init with PII scrubbing (strip file paths/names from breadcrumbs).
 
 - [ ] **T0.5 CI** `[launch]`
@@ -175,6 +175,10 @@ Device rule: every Phase 2 task stays `BLOCKED (device)` until it passes on the 
 - [ ] **T6.4 Privacy docs** `[launch]`
   `docs/DATA_SAFETY.md` mapping each SDK (AdMob, RevenueCat, Sentry, Firebase Analytics, Firebase Remote Config) to Play Data Safety answers — declare accurately; do not claim "no data collected" while running ads. Privacy policy page (static site). Analytics runs on by default with disclosure in onboarding + privacy policy and an opt-out in Settings; UMP handles ad consent where Google requires it.
   **Needs human verification:** whether the Nigeria Data Protection Act 2023 (and francophone-market laws) require explicit opt-in consent for analytics; adjust the default if so.
+
+- [ ] **T6.6 Native crash scrubbing** `[launch]`
+  Sentry's Android SDK runs its own `beforeSend`, so native crash, ANR and NDK events bypass the JS scrubber (`src/lib/crash`). T0.4 therefore ships with `enableNative: false` (JS errors only). Add a native hook that wraps the Android SDK's `beforeSend` after init with a Kotlin port of the same redaction rules (shared test vectors with `__tests__/crash/scrub.test.ts`), check whether NDK envelopes from the outbox pass through it, then set `enableNative: true`. Also decide on a "Send crash reports" switch in Settings with T6.4.
+  **Done when:** a forced Kotlin exception whose message contains a `/storage/…` path arrives in Sentry redacted; JS and native tests share the same vectors.
 
 ## Phase 7 — Launch & ASO
 

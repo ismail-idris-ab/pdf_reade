@@ -45,6 +45,7 @@ function Gallery() {
   const [sheet, setSheet] = useState(false);
   const [dialog, setDialog] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [crash, setCrash] = useState(false);
 
   // Simulated operation: +10% every 300ms, then close with a toast.
   useEffect(() => {
@@ -60,6 +61,9 @@ function Gallery() {
     }, 300);
     return () => clearTimeout(timer);
   }, [progress]);
+
+  // Throwing during render exercises the root ErrorBoundary.
+  if (crash) throw new Error('Test error from the design gallery');
 
   return (
     <ScrollView
@@ -147,6 +151,12 @@ function Gallery() {
               })
             }
           />
+        </View>
+      </Section>
+
+      <Section title="Error boundary">
+        <View className="px-4">
+          <Button label="Throw test error" variant="danger" onPress={() => setCrash(true)} />
         </View>
       </Section>
 
