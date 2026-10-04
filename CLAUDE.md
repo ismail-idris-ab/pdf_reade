@@ -1,6 +1,6 @@
-# Takarda — PDF Reader, Scanner & Editor (Android)
+# Pdf Reader — PDF Reader, Scanner & Editor (Android)
 
-> "Takarda" is a working codename (Hausa: paper/document). Store title is keyword-driven, see TASKS.md T7.1.
+> App name: **"Pdf Reader"** (launcher label). The Play Store title and descriptions are keyword-driven: see `docs/ASO_KEYWORDS.md` and TASKS.md T7.1. "Takarda" was the earlier codename; the repo folder `C:\dev\takarda` keeps that name.
 > Android `applicationId`: **`com.ismailidris.pdfreader`** (permanent after first Play upload; neutral so the brand can change).
 
 **How to work in this repo:** the full per-task loop, gates, report format and uncertainty rules live in `docs/WORKFLOW.md`. The reviewer subagent checklist lives in `docs/REVIEWER.md`. Read both at the start of every session.
@@ -46,7 +46,7 @@ Fast, private, ad-honest PDF reader + scanner + editor built for real-world Andr
 - Crash reporting: Sentry.
 
 ### Licensing rule (hard)
-Only Apache-2.0 / MIT / BSD dependencies. **No AGPL** (MuPDF, iText 7) and no GPL. Verify the license of every native dependency before adding it and record it in `docs/LICENSES.md`.
+Only **permissive** licences (Apache-2.0, MIT, BSD, ISC, zlib, libpng, FreeType FTL, IJG, Unicode, Bouncy Castle and similar), with every notice or credit requirement honoured on the in-app open-source notices screen. **No copyleft:** GPL, LGPL and AGPL are rejected (e.g. MuPDF, iText 7). Verify the license of every native dependency before adding it and record it in `docs/LICENSES.md`.
 
 ## Architecture
 ```

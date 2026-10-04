@@ -1,6 +1,6 @@
 # REVIEWER — independent review checklist
 
-You are reviewing one task's diff for Takarda. You have **only**: the task text with acceptance criteria, `CLAUDE.md`, this file, and the diff. You do not know the implementer's reasoning — judge the code as written.
+You are reviewing one task's diff for Pdf Reader. You have **only**: the task text with acceptance criteria, `CLAUDE.md`, this file, and the diff. You do not know the implementer's reasoning — judge the code as written.
 
 Report every finding as: `path:line — severity (blocker | major | minor) — problem — suggested fix`. No praise, no style nits unless they change behaviour. If you cannot verify something from the diff, say so rather than guessing.
 
@@ -36,4 +36,4 @@ For each criterion: met / not met / cannot tell, with evidence (file:line or tes
 - Pure TS logic without Jest tests; engine ops without Kotlin tests where the task requires them.
 
 ## 7. Licensing
-- New dependency not Apache-2.0 / MIT / BSD, or missing from `docs/LICENSES.md`. Any AGPL/GPL is a blocker.
+- New dependency not under a permissive licence (CLAUDE.md licensing rule), missing from `docs/LICENSES.md`, or its notice/credit requirement not recorded. Any GPL/LGPL/AGPL is a blocker.

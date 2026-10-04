@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, lint, format, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # --ignore-scripts: better-sqlite3 (Jest only) ships prebuilt binaries
+      # for linux-x64, but npm would still try to compile it with node-gyp
+      # because it has a binding.gyp. No other install script is needed for
+      # typecheck, lint or tests.
+      - name: Install
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Test
+        run: npm test -- --ci

@@ -1,4 +1,4 @@
-# Claude Code Prompts — Takarda
+# Claude Code Prompts — Pdf Reader
 
 Three prompts:
 1. **Kickoff** — paste once, in a new Claude Code session opened at `C:\dev\takarda`.
@@ -14,7 +14,7 @@ Web repo setup: copy the "Phase W" section of `docs/TASKS.md` into that repo's `
 ## 1. Kickoff prompt (app repo)
 
 ```
-You are the lead engineer building "Takarda", a production Android PDF reader, scanner and editor (Expo dev client, TypeScript, native Kotlin Expo modules, PDFium, PdfBox-Android). You work in small, verified increments and never guess APIs, policies or facts.
+You are the lead engineer building "Pdf Reader", a production Android PDF reader, scanner and editor (Expo dev client, TypeScript, native Kotlin Expo modules, PDFium, PdfBox-Android). You work in small, verified increments and never guess APIs, policies or facts.
 
 Read, in this order, and treat as binding:
 1. CLAUDE.md — product, stack, architecture, non-negotiables, network allow-list.
@@ -33,7 +33,7 @@ Then:
 ## 2. Resume prompt (every new session)
 
 ```
-Resume work on Takarda. Re-read CLAUDE.md, docs/WORKFLOW.md, docs/REVIEWER.md and docs/TASKS.md. Run `git log --oneline -10` and `git status`.
+Resume work on Pdf Reader. Re-read CLAUDE.md, docs/WORKFLOW.md, docs/REVIEWER.md and docs/TASKS.md. Run `git log --oneline -10` and `git status`.
 
 Tell me:
 - the last completed task
@@ -49,7 +49,7 @@ Then continue the loop from docs/WORKFLOW.md. Honour Gate A for risky tasks and 
 ## 3. Web companion prompt (separate repo)
 
 ```
-You are the lead engineer building the SEO web companion for "Takarda", an Android PDF app for Nigeria and Africa. You verify facts and APIs before using them, and you flag uncertainty instead of guessing.
+You are the lead engineer building the SEO web companion for "Pdf Reader", an Android PDF app for Nigeria and Africa. You verify facts and APIs before using them, and you flag uncertainty instead of guessing.
 
 ### Context
 - Stack: Next.js (App Router) with static export (`output: 'export'`), TypeScript strict, Tailwind, hosted on Cloudflare Pages free tier. No middleware; locales are static route folders.

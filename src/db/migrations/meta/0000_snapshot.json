@@ -1,0 +1,421 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "fe5c8eb3-6e07-42ce-bca1-0cf69fcbaf57",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "annotation_drafts": {
+      "name": "annotation_drafts",
+      "columns": {
+        "file_id": {
+          "name": "file_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "json": {
+          "name": "json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "annotation_drafts_file_id_files_id_fk": {
+          "name": "annotation_drafts_file_id_files_id_fk",
+          "tableFrom": "annotation_drafts",
+          "tableTo": "files",
+          "columnsFrom": ["file_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "bookmarks": {
+      "name": "bookmarks",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "file_id": {
+          "name": "file_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "page": {
+          "name": "page",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "bookmarks_file_page_unique": {
+          "name": "bookmarks_file_page_unique",
+          "columns": ["file_id", "page"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "bookmarks_file_id_files_id_fk": {
+          "name": "bookmarks_file_id_files_id_fk",
+          "tableFrom": "bookmarks",
+          "tableTo": "files",
+          "columnsFrom": ["file_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "bookmarks_page_check": {
+          "name": "bookmarks_page_check",
+          "value": "\"bookmarks\".\"page\" >= 0"
+        }
+      }
+    },
+    "files": {
+      "name": "files",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ext": {
+          "name": "ext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mime": {
+          "name": "mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mtime": {
+          "name": "mtime",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "page_count": {
+          "name": "page_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_opened_at": {
+          "name": "last_opened_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_favorite": {
+          "name": "is_favorite",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "files_path_unique": {
+          "name": "files_path_unique",
+          "columns": ["path"],
+          "isUnique": true
+        },
+        "files_last_opened_idx": {
+          "name": "files_last_opened_idx",
+          "columns": ["last_opened_at"],
+          "isUnique": false
+        },
+        "files_favorite_idx": {
+          "name": "files_favorite_idx",
+          "columns": ["is_favorite"],
+          "isUnique": false
+        },
+        "files_mtime_idx": {
+          "name": "files_mtime_idx",
+          "columns": ["mtime", "id"],
+          "isUnique": false
+        },
+        "files_source_mtime_idx": {
+          "name": "files_source_mtime_idx",
+          "columns": ["source", "mtime"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "files_source_check": {
+          "name": "files_source_check",
+          "value": "\"files\".\"source\" IN ('downloads', 'whatsapp', 'scans', 'device')"
+        }
+      }
+    },
+    "reading_state": {
+      "name": "reading_state",
+      "columns": {
+        "file_id": {
+          "name": "file_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "page": {
+          "name": "page",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "zoom": {
+          "name": "zoom",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'vertical'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "reading_state_file_id_files_id_fk": {
+          "name": "reading_state_file_id_files_id_fk",
+          "tableFrom": "reading_state",
+          "tableTo": "files",
+          "columnsFrom": ["file_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "reading_state_page_check": {
+          "name": "reading_state_page_check",
+          "value": "\"reading_state\".\"page\" >= 0"
+        },
+        "reading_state_zoom_check": {
+          "name": "reading_state_zoom_check",
+          "value": "\"reading_state\".\"zoom\" BETWEEN 1 AND 5"
+        },
+        "reading_state_mode_check": {
+          "name": "reading_state_mode_check",
+          "value": "\"reading_state\".\"mode\" IN ('vertical', 'horizontal')"
+        }
+      }
+    },
+    "trash": {
+      "name": "trash",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "original_path": {
+          "name": "original_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "trashed_path": {
+          "name": "trashed_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mime": {
+          "name": "mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "trash_trashed_path_unique": {
+          "name": "trash_trashed_path_unique",
+          "columns": ["trashed_path"],
+          "isUnique": true
+        },
+        "trash_deleted_at_idx": {
+          "name": "trash_deleted_at_idx",
+          "columns": ["deleted_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "usage": {
+      "name": "usage",
+      "columns": {
+        "feature": {
+          "name": "feature",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "usage_feature_day_pk": {
+          "columns": ["feature", "day"],
+          "name": "usage_feature_day_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

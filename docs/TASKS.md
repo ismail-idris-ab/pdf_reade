@@ -1,4 +1,4 @@
-# TASKS — Takarda (Android, Expo)
+# TASKS — Pdf Reader (Android, Expo)
 
 Scope: **MVP = every task tagged `[launch]`** across Phases 0–7 plus W1–W4. Tasks tagged `[post-launch]` are skipped on the first pass and picked up after launch in the order listed. The original estimate of 35–38 working days is optimistic; plan against the `[launch]` set only. Phase W runs in a separate repo and can be done in parallel sessions from Phase 3 onward (it reuses the target-size logic). Phase 8 is post-launch.
 Market: Nigeria first, then Africa. Revenue: ads + rewarded first. Launch language: English only (Hausa/French built but hidden until reviewed).
@@ -8,42 +8,43 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 
 ## Phase 0 — Foundation
 
-- [ ] **T0.1 Project init** `[launch]`
+- [x] **T0.1 Project init** `[launch]`
   Expo (latest SDK) + dev client, TS strict, expo-router, NativeWind v4, ESLint/Prettier, `@/` path alias. `eas.json` with `development`, `preview` (APK), `production` (AAB) profiles. Android package id `com.ismailidris.pdfreader`, `minSdkVersion 26`, target SDK = current Play requirement. Local modules scaffolded: `pdf-engine`, `file-index`, `secure-vault` (empty APIs that compile).
   **Done when:** dev build installs and launches on a physical device; `tsc`, lint pass.
 
-- [ ] **T0.1b Native engine spike (PDFium + PdfBox-Android)** `[launch]`
+- [x] **T0.1b Native engine spike (PDFium + PdfBox-Android)** `[launch]`
   Timeboxed to one session; runs right after T0.1 because a failure here can change the stack. Integrate prebuilt PDFium binaries (e.g. `bblanchon/pdfium-binaries`) with a thin own JNI layer inside `modules/pdf-engine`, and PdfBox-Android, then prove the pipeline end to end. Do not build on unmaintained `pdfium-android` forks unless the checks below show they pass.
   **Done when:** (1) PDFium renders page 1 of a fixture PDF to a bitmap inside the Expo module on the Android 16 phone and the emulator; (2) PdfBox-Android merges two PDFs and the output opens in PDFium; (3) every bundled `.so` passes a 16 KB page-size alignment check; (4) release AAB size growth from the native libraries is measured and reported; (5) all licenses are verified and recorded in `docs/LICENSES.md`. If any check fails: stop, show the evidence, propose alternatives.
 
-- [ ] **T0.2 Database** `[launch]`
+- [x] **T0.2 Database** `[launch]`
   drizzle + expo-sqlite. Tables: `files` (id, path, uri, name, ext, mime, size, mtime, pageCount, lastOpenedAt, isFavorite, source), `bookmarks` (fileId, page, label, createdAt), `reading_state` (fileId, page, zoom, mode), `trash` (id, originalPath, trashedPath, deletedAt), `usage` (feature, day, count), `annotation_drafts` (fileId, json, updatedAt). FTS5 virtual table on file names. Typed repositories. Migrations checked in.
   **Done when:** repositories have Jest tests (in-memory or mocked) for CRUD + migration from empty.
 
-- [ ] **T0.3 Design system** `[launch]`
+- [x] **T0.3 Design system** `[launch]`
   Theme tokens (light / dark / sepia), persisted color scheme, primitives: Button, IconButton, ListItem, BottomSheet, Dialog, Toast, EmptyState, ProgressSheet (with cancel). Accessible touch targets ≥ 48dp.
 
-- [ ] **T0.4 Errors + crash reporting** `[launch]`
+- [x] **T0.4 Errors + crash reporting** `[launch]`
   Shared error codes (see CLAUDE.md), `toUserMessage(code)`, global error boundary, Sentry init with PII scrubbing (strip file paths/names from breadcrumbs).
 
-- [ ] **T0.5 CI** `[launch]`
+- [x] **T0.5 CI** `[launch]`
   GitHub Actions: install, `tsc --noEmit`, lint, Jest on every push.
 
-- [ ] **T0.6 i18n** `[launch]`
+- [x] **T0.6 i18n** `[launch]`
   i18next + expo-localization. Locales: `en`, `ha` (Hausa), `fr`. Typed translation keys (missing key = type error). In-app language switcher overriding device locale. `ha` and `fr` are hidden from the switcher and ignored as device locales unless the `enabledLocales` config flag includes them (launch config: `["en"]`). Every new `ha`/`fr` string is logged in `docs/TRANSLATIONS_TO_REVIEW.md`. Number/size formatting per locale (KB/MB).
 
 ## Phase 1 — File access & library
 
-- [ ] **T1.1 `file-index` native module** `[launch]`
+- [x] **T1.1 `file-index` native module** `[launch]`
   `hasAllFilesAccess()`, `openAllFilesAccessSettings()`, `scan({ exts, knownMtimes })` streaming batches via events (skip `Android/data`, `Android/obb`, hidden dirs, >5 levels of symlinks), `stat(path)`, `copyContentUriToCache(uri)`, `share(paths, mime)` via FileProvider with narrowly scoped paths.
   **Done when:** full scan of a device with ~2,000 files completes without blocking UI; incremental rescan only emits changed files.
 
-- [ ] **T1.2 Onboarding + permission flow** `[launch]`
+- [x] **T1.2 Onboarding + permission flow** `[launch]`
   Value-first screen → "Allow access to find all documents" or "Pick files manually". Re-check permission on resume. Library works fully in manual mode (SAF picker, persisted URI permissions).
 
 - [ ] **T1.3 Library screens** `[launch]`
   Tabs: All / PDF / Word / Excel / Other; sections Recent, Favorites. Source chips: All, Downloads, **WhatsApp** (`Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Documents`), Scans, My Files. List/grid toggle, sort (name, date, size), name search via FTS. First-page thumbnails rendered by engine, disk-cached with LRU cap (100 MB).
   **Done when:** 2,000-item library scrolls at 60fps on low-end device; thumbnails never block scroll.
+  Note (from T1.2): Dedupe a picked content:// document with the same file later found by the full scan (match on name + size + mtime) so it doesn't appear twice.
 
 - [ ] **T1.4 File actions + folders** `[launch]`
   Rename, move, duplicate, details, favorite, share, print, delete. Until T1.5 (recycle bin, post-launch) ships, delete is permanent and always behind a confirmation dialog naming the file. App-managed "My Files" folder with nested folders + import.
@@ -54,6 +55,11 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 - [ ] **T1.6 Intents: "Open with" + share target** `[launch]`
   Config plugin adding intent filters: `VIEW` for `application/pdf` and DOCX/XLSX/CSV/TXT MIME types; `SEND` / `SEND_MULTIPLE` for PDFs and images (images → Image-to-PDF flow). Handle cold and warm starts.
   **Done when:** opening a PDF from WhatsApp and a file manager lands directly in the reader; sharing 5 images from Gallery opens Image-to-PDF prefilled.
+  Note (from T1.2): every content:// row in the `files` table must hold a persisted URI grant. Transient "Open with"/share URIs must be copied into the cache (`copyContentUriToCache`) and stored by file path, never by URI, so `prunePickedDocuments` stays safe.
+
+- [ ] **T1.7 Settings screen** `[launch]`
+  One screen collecting app-wide settings built elsewhere: Theme (T0.3 `THEME_PREFERENCES`), Language (mounts `LanguagePicker` from T0.6), Open-source licences (T7.5), Analytics opt-out (T6.4), Send crash reports (T6.6), app version. Reachable from the library header.
+  **Done when:** theme and language changes apply immediately and survive a restart; with `enabledLocales: ["en"]` the language list shows only "Use phone language" and English.
 
 ## Phase 2 — Reader (the core; don't rush it)
 
@@ -176,10 +182,14 @@ Device rule: every Phase 2 task stays `BLOCKED (device)` until it passes on the 
   `docs/DATA_SAFETY.md` mapping each SDK (AdMob, RevenueCat, Sentry, Firebase Analytics, Firebase Remote Config) to Play Data Safety answers — declare accurately; do not claim "no data collected" while running ads. Privacy policy page (static site). Analytics runs on by default with disclosure in onboarding + privacy policy and an opt-out in Settings; UMP handles ad consent where Google requires it.
   **Needs human verification:** whether the Nigeria Data Protection Act 2023 (and francophone-market laws) require explicit opt-in consent for analytics; adjust the default if so.
 
+- [ ] **T6.6 Native crash scrubbing** `[launch]`
+  Sentry's Android SDK runs its own `beforeSend`, so native crash, ANR and NDK events bypass the JS scrubber (`src/lib/crash`). T0.4 therefore ships with `enableNative: false` (JS errors only). Add a native hook that wraps the Android SDK's `beforeSend` after init with a Kotlin port of the same redaction rules (shared test vectors with `__tests__/crash/scrub.test.ts`), check whether NDK envelopes from the outbox pass through it, then set `enableNative: true`. Also decide on a "Send crash reports" switch in Settings with T6.4.
+  **Done when:** a forced Kotlin exception whose message contains a `/storage/…` path arrives in Sentry redacted; JS and native tests share the same vectors.
+
 ## Phase 7 — Launch & ASO
 
 - [ ] **T7.1 Store listing** `[launch]`
-  Title (≤30 chars) leads with the primary keyword, e.g. "PDF Reader & Scanner – Takarda". Short description (≤80) with top keywords. Long description: natural keyword use (pdf reader, pdf editor, scanner, compress pdf, merge pdf, sign pdf, image to pdf), feature bullets, privacy + "no ads while reading" promise. 8 screenshots with benefit captions (Compress to exact size, Submit-ready scans, WhatsApp docs, Offline & private). Feature graphic. Default listing in English written for Nigerian search behaviour ("compress pdf", "reduce pdf size", "pdf to 100kb", "passport photo resize"). Country-targeted custom store listings for Nigeria, Ghana, Kenya. **Launch is English-only:** the French listing (francophone Africa) and any Hausa listing/screenshots are added only after the corresponding section of `docs/TRANSLATIONS_TO_REVIEW.md` is cleared by a paid native-speaker reviewer and `ha`/`fr` are enabled in config. Find and budget those reviewers as part of this task.
+  Title (≤30 chars) leads with the primary keyword, e.g. "PDF Reader: PDF Viewer Offline" (pick from `docs/ASO_KEYWORDS.md`). Short description (≤80) with top keywords. Long description: natural keyword use (pdf reader, pdf viewer, pdf reader offline, document reader, pdf editor, scanner, compress pdf, merge pdf, sign pdf, image to pdf), feature bullets, privacy + "no ads while reading" promise. 8 screenshots with benefit captions (Compress to exact size, Submit-ready scans, WhatsApp docs, Offline & private). Feature graphic. Default listing in English written for Nigerian search behaviour ("compress pdf", "reduce pdf size", "pdf to 100kb", "passport photo resize"). Country-targeted custom store listings for Nigeria, Ghana, Kenya. **Launch is English-only:** the French listing (francophone Africa) and any Hausa listing/screenshots are added only after the corresponding section of `docs/TRANSLATIONS_TO_REVIEW.md` is cleared by a paid native-speaker reviewer and `ha`/`fr` are enabled in config. Find and budget those reviewers as part of this task.
 
 - [ ] **T7.2 Permission declaration** `[launch]`
   All-files-access declaration: core use = document management/reader, with a short demo video showing scan → library. App must remain functional if denied.
@@ -189,6 +199,10 @@ Device rule: every Phase 2 task stays `BLOCKED (device)` until it passes on the 
 
 - [ ] **T7.4 Analytics funnel** `[launch]`
   Events: install_open, permission_granted/denied, first_file_opened, tool_completed{tool}, paywall_shown{trigger}, trial_started, purchase{product}, rewarded_unlock{tool}. No file names or paths in events.
+
+- [ ] **T7.5 Open-source notices screen** `[launch]`
+  Settings → "Open-source licences": every entry in `docs/LICENSES.md`, the full licence texts shipped in the PDFium archive's `licenses/` folder, and the FreeType and IJG credit lines (required by FTL and IJG). Generated at build time from a checked-in list so it can't drift from the dependencies.
+  **Done when:** every native and bundled component in `docs/LICENSES.md` appears with its full licence text; screen works offline.
 
 ## Phase W — Web SEO companion (separate repo, parallel from Phase 3)
 
