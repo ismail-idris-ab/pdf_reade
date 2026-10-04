@@ -20,7 +20,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
   drizzle + expo-sqlite. Tables: `files` (id, path, uri, name, ext, mime, size, mtime, pageCount, lastOpenedAt, isFavorite, source), `bookmarks` (fileId, page, label, createdAt), `reading_state` (fileId, page, zoom, mode), `trash` (id, originalPath, trashedPath, deletedAt), `usage` (feature, day, count), `annotation_drafts` (fileId, json, updatedAt). FTS5 virtual table on file names. Typed repositories. Migrations checked in.
   **Done when:** repositories have Jest tests (in-memory or mocked) for CRUD + migration from empty.
 
-- [ ] **T0.3 Design system** `[launch]`
+- [x] **T0.3 Design system** `[launch]`
   Theme tokens (light / dark / sepia), persisted color scheme, primitives: Button, IconButton, ListItem, BottomSheet, Dialog, Toast, EmptyState, ProgressSheet (with cancel). Accessible touch targets ≥ 48dp.
 
 - [ ] **T0.4 Errors + crash reporting** `[launch]`

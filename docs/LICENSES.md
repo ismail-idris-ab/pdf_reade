@@ -44,6 +44,9 @@ Only permissive licences are allowed, with their notice/credit requirements hono
 | better-sqlite3 (dev, Jest only) | 13.0.3 | MIT | node_modules/better-sqlite3/package.json | T0.2 |
 | @types/better-sqlite3 (dev) | 9.6.0 | MIT | node_modules/@types/better-sqlite3/package.json | T0.2 |
 | babel-plugin-inline-import (dev) | 3.0.0 | MIT | node_modules/babel-plugin-inline-import/package.json | T0.2 |
+| zustand | 5.0.15 | MIT | node_modules/zustand/package.json | T0.3 |
+| @testing-library/react-native (dev) | 14.0.1 | MIT | node_modules/@testing-library/react-native/package.json | T0.3 |
+| test-renderer (dev, RNTL peer) | 1.3.0 | MIT | node_modules/test-renderer/package.json | T0.3 |
 
 ## Transitive dependency notes
 

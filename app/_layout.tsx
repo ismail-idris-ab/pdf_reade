@@ -3,11 +3,12 @@ import '../global.css';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { ToastHost } from '@/components/ui';
 import { getDatabase, getRepositories } from '@/db/client';
 import migrations from '@/db/migrations/migrations';
+import { ThemeProvider, useTheme } from '@/theme';
 
 // Keep the splash screen up until the database is migrated.
 void SplashScreen.preventAutoHideAsync();
@@ -31,9 +32,21 @@ export default function RootLayout() {
   if (!success) return null;
 
   return (
-    <>
-      <Stack screenOptions={{ headerShown: false }} />
-      <StatusBar style="auto" />
-    </>
+    <ThemeProvider>
+      <ThemedStack />
+      <ToastHost />
+    </ThemeProvider>
+  );
+}
+
+function ThemedStack() {
+  const { palette } = useTheme();
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: palette.background },
+      }}
+    />
   );
 }

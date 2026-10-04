@@ -1,7 +1,9 @@
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
 
+import { Button } from '@/components/ui';
 import { getPdfEngineApiVersion, runSpikeMerge, runSpikeRender } from '@/lib/engine';
 import { getFileIndexApiVersion } from '@/lib/files';
 import { getSecureVaultApiVersion } from '@/lib/vault';
@@ -10,14 +12,21 @@ export default function HomeScreen() {
   const appName = Constants.expoConfig?.name ?? '';
 
   return (
-    <View className="flex-1 items-center justify-center bg-white dark:bg-black">
-      <Text className="text-2xl font-semibold text-black dark:text-white">{appName}</Text>
+    <View className="flex-1 items-center justify-center bg-background">
+      <Text className="text-2xl font-semibold text-foreground">{appName}</Text>
       {__DEV__ ? (
         <>
-          <Text className="mt-2 text-xs text-neutral-500">
+          <Text className="mt-2 text-xs text-muted">
             {`pdf-engine v${getPdfEngineApiVersion()} · file-index v${getFileIndexApiVersion()} · secure-vault v${getSecureVaultApiVersion()}`}
           </Text>
           <EngineSpikePanel />
+          <View className="mt-4">
+            <Button
+              label="Design system"
+              variant="secondary"
+              onPress={() => router.push('/dev/design')}
+            />
+          </View>
         </>
       ) : null}
     </View>
@@ -55,21 +64,21 @@ function EngineSpikePanel() {
     <View className="mt-6 w-full items-center px-4">
       <Pressable
         accessibilityRole="button"
-        className="rounded-lg bg-blue-600 px-4 py-3"
+        className="rounded-lg min-h-12 justify-center bg-primary px-4 py-3"
         disabled={running}
         onPress={run}
       >
-        <Text className="text-white">{running ? 'Running…' : 'Run engine spike'}</Text>
+        <Text className="text-primary-foreground">{running ? 'Running…' : 'Run engine spike'}</Text>
       </Pressable>
       {pngPath ? (
         <Image
-          className="mt-4 h-40 w-28 border border-neutral-400"
+          className="mt-4 h-40 w-28 border border-border"
           resizeMode="contain"
           source={{ uri: `file://${pngPath}` }}
         />
       ) : null}
       {output ? (
-        <Text selectable className="mt-4 font-mono text-xs text-black dark:text-white">
+        <Text selectable className="mt-4 font-mono text-xs text-foreground">
           {output}
         </Text>
       ) : null}

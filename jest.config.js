@@ -5,5 +5,6 @@ module.exports = {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   testMatch: ['**/*.test.ts', '**/*.test.tsx'],
+  setupFiles: ['<rootDir>/jest.setup.ts'],
   testPathIgnorePatterns: ['/node_modules/', '/android/', '/ios/'],
 };
