@@ -41,6 +41,9 @@ const config: ExpoConfig = {
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
+    // Expo's template adds legacy WRITE_EXTERNAL_STORAGE; the app never writes
+    // to shared storage that way (imports and shares go through the cache).
+    blockedPermissions: ['android.permission.WRITE_EXTERNAL_STORAGE'],
   },
   plugins: [
     'expo-router',

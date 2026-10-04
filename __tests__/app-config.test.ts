@@ -25,6 +25,12 @@ describe('app config', () => {
     expect(config.name).toBe('Pdf Reader');
   });
 
+  it('blocks the legacy shared-storage write permission', () => {
+    expect(config.android?.blockedPermissions).toContain(
+      'android.permission.WRITE_EXTERNAL_STORAGE',
+    );
+  });
+
   it('targets Android only', () => {
     expect(config.platforms).toEqual(['android']);
   });

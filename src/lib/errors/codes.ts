@@ -1,5 +1,5 @@
 // Error codes shared with the native modules. Keep in sync with
-// modules/pdf-engine/android/.../ErrorCode.kt (enforced by a Jest test).
+// modules/pdf-engine and modules/file-index ErrorCode.kt (enforced by a Jest test).
 export const ERROR_CODES = [
   'PASSWORD_REQUIRED',
   'WRONG_PASSWORD',

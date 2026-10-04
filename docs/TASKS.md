@@ -34,7 +34,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 
 ## Phase 1 — File access & library
 
-- [ ] **T1.1 `file-index` native module** `[launch]`
+- [x] **T1.1 `file-index` native module** `[launch]`
   `hasAllFilesAccess()`, `openAllFilesAccessSettings()`, `scan({ exts, knownMtimes })` streaming batches via events (skip `Android/data`, `Android/obb`, hidden dirs, >5 levels of symlinks), `stat(path)`, `copyContentUriToCache(uri)`, `share(paths, mime)` via FileProvider with narrowly scoped paths.
   **Done when:** full scan of a device with ~2,000 files completes without blocking UI; incremental rescan only emits changed files.
 

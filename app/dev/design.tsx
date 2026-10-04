@@ -2,8 +2,8 @@
 // developer-facing and intentionally not translated; the route redirects
 // home in release builds.
 import { Redirect } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -18,6 +18,15 @@ import {
 } from '@/components/ui';
 import { LanguagePicker } from '@/components/LanguagePicker';
 import { useFormatFileSize, useLocaleStore, useTranslation } from '@/i18n';
+import { toAppError } from '@/lib/errors';
+import {
+  DEFAULT_SCAN_EXTS,
+  hasAllFilesAccess,
+  openAllFilesAccessSettings,
+  scanDocuments,
+  type ScanHandle,
+  type ScanSummary,
+} from '@/lib/files';
 import { THEME_PREFERENCES, useTheme } from '@/theme';
 
 export default function DesignGallery() {
@@ -169,6 +178,8 @@ function Gallery() {
         </View>
       </Section>
 
+      <FileIndexSection />
+
       <Section title="Error boundary">
         <View className="px-4">
           <Button label="Throw test error" variant="danger" onPress={() => setCrash(true)} />
@@ -216,5 +227,114 @@ function Gallery() {
         }}
       />
     </ScrollView>
+  );
+}
+
+type ScanProgress = { batches: number; files: number };
+
+function readAccess(): string {
+  try {
+    return hasAllFilesAccess() ? 'granted' : 'denied';
+  } catch (e) {
+    return `error (${toAppError(e).code})`;
+  }
+}
+
+// Exercises the file-index module: all-files access and incremental scans.
+// The previous run's path → mtime map is kept so a second scan only reports
+// new or changed files plus deletions.
+function FileIndexSection() {
+  const [access, setAccess] = useState(readAccess);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<ScanProgress>({ batches: 0, files: 0 });
+  const [summary, setSummary] = useState<ScanSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [known, setKnown] = useState<Record<string, number>>({});
+  const handleRef = useRef<ScanHandle | null>(null);
+
+  const refreshAccess = useCallback(() => setAccess(readAccess()), []);
+
+  // Re-check when returning from the system settings screen.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshAccess();
+    });
+    return () => subscription.remove();
+  }, [refreshAccess]);
+
+  // Leaving the screen stops a running scan.
+  useEffect(() => () => handleRef.current?.cancel(), []);
+
+  const openSettings = () => {
+    openAllFilesAccessSettings().catch((e: unknown) => {
+      toast(`Could not open settings (${toAppError(e).code})`);
+    });
+  };
+
+  const scan = () => {
+    const nextKnown = new Map(Object.entries(known));
+    let batches = 0;
+    let files = 0;
+    setProgress({ batches, files });
+    setSummary(null);
+    setError(null);
+    setRunning(true);
+    const handle = scanDocuments({
+      exts: DEFAULT_SCAN_EXTS,
+      knownMtimes: known,
+      onBatch: (batch) => {
+        batches += 1;
+        files += batch.length;
+        for (const file of batch) nextKnown.set(file.path, file.mtime);
+        setProgress({ batches, files });
+      },
+    });
+    handleRef.current = handle;
+    handle.result
+      .then(
+        (result) => {
+          if (!result.cancelled) for (const path of result.deleted) nextKnown.delete(path);
+          setKnown(Object.fromEntries(nextKnown));
+          setSummary(result);
+        },
+        (e: unknown) => setError(toAppError(e).code),
+      )
+      .finally(() => {
+        handleRef.current = null;
+        setRunning(false);
+      });
+  };
+
+  const lines = [
+    `All-files access: ${access}`,
+    `Known files (input to next scan): ${Object.keys(known).length}`,
+    `Batches: ${progress.batches} · Files received: ${progress.files}`,
+  ];
+  if (summary) {
+    lines.push(
+      `${summary.cancelled ? 'Cancelled' : 'Completed'} in ${summary.durationMs} ms`,
+      `Scanned: ${summary.scanned} · Emitted: ${summary.emitted} · Deleted: ${summary.deleted.length} · Skipped dirs: ${summary.skippedDirs}`,
+    );
+  }
+  if (error) lines.push(`Error: ${error}`);
+
+  return (
+    <Section title="File index">
+      <View className="gap-1 px-4">
+        {lines.map((line) => (
+          <Text key={line} className="text-base text-foreground">
+            {line}
+          </Text>
+        ))}
+      </View>
+      <View className="flex-row flex-wrap gap-2 px-4">
+        <Button label="Open access settings" variant="secondary" onPress={openSettings} />
+        <Button label="Refresh access" variant="secondary" onPress={refreshAccess} />
+        <Button label="Scan" loading={running} onPress={scan} />
+        {running ? (
+          <Button label="Cancel" variant="danger" onPress={() => handleRef.current?.cancel()} />
+        ) : null}
+      </View>
+    </Section>
   );
 }

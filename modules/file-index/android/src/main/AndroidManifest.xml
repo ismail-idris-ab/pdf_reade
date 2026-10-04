@@ -1,2 +1,25 @@
-<manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
+
+  <!-- Auto-scan of shared storage (API 30+). Manual picking works without it. -->
+  <uses-permission
+    android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+    tools:ignore="ScopedStorage" />
+  <!-- Auto-scan on API 26-29; superseded by MANAGE_EXTERNAL_STORAGE from API 30. -->
+  <uses-permission
+    android:name="android.permission.READ_EXTERNAL_STORAGE"
+    android:maxSdkVersion="29" />
+
+  <!-- requestLegacyExternalStorage keeps direct file access on API 29. -->
+  <application android:requestLegacyExternalStorage="true">
+    <provider
+      android:name="com.ismailidris.pdfreader.fileindex.FileIndexFileProvider"
+      android:authorities="${applicationId}.fileindex.provider"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/file_index_paths" />
+    </provider>
+  </application>
 </manifest>

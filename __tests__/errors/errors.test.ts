@@ -3,21 +3,32 @@ import path from 'node:path';
 
 import { AppError, ERROR_CODES, toAppError, toUserMessage, type AppErrorCode } from '@/lib/errors';
 
-const KOTLIN_ERROR_CODE = path.join(
-  __dirname,
-  '../../modules/pdf-engine/android/src/main/java/com/ismailidris/pdfreader/pdfengine/ErrorCode.kt',
-);
+// Every native module that rejects with shared error codes has its own copy
+// of the enum; each must match ERROR_CODES.
+const KOTLIN_ERROR_CODES = {
+  'pdf-engine':
+    'modules/pdf-engine/android/src/main/java/com/ismailidris/pdfreader/pdfengine/ErrorCode.kt',
+  'file-index':
+    'modules/file-index/android/src/main/java/com/ismailidris/pdfreader/fileindex/ErrorCode.kt',
+};
 
 describe('error codes', () => {
-  it('match the Kotlin ErrorCode enum exactly', () => {
-    const source = fs.readFileSync(KOTLIN_ERROR_CODE, 'utf8');
-    const body = /enum class ErrorCode \{([^}]*)\}/.exec(source)?.[1] ?? '';
-    const kotlinCodes = body
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    expect(kotlinCodes).toEqual([...ERROR_CODES]);
-  });
+  it.each(Object.entries(KOTLIN_ERROR_CODES))(
+    'match the %s Kotlin ErrorCode enum exactly',
+    (module, relativePath) => {
+      const file = path.join(__dirname, '../..', relativePath);
+      if (!fs.existsSync(file)) {
+        throw new Error(`${module} is missing its Kotlin ErrorCode enum at ${relativePath}`);
+      }
+      const source = fs.readFileSync(file, 'utf8');
+      const body = /enum class ErrorCode \{([^}]*)\}/.exec(source)?.[1] ?? '';
+      const kotlinCodes = body
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      expect(kotlinCodes).toEqual([...ERROR_CODES]);
+    },
+  );
 });
 
 describe('toAppError', () => {
