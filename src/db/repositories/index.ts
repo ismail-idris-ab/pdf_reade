@@ -20,3 +20,12 @@ export function createRepositories(db: AppDatabase) {
 export type Repositories = ReturnType<typeof createRepositories>;
 
 export { toFtsQuery } from './files';
+export { compareNames } from './files';
+export type {
+  GrantEntry,
+  LibraryFile,
+  LibraryQuery,
+  LibrarySort,
+  MergeContentResult,
+  SortDir,
+} from './files';

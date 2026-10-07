@@ -44,3 +44,19 @@ export function formatNumber(value: number, locale: Locale, maximumFractionDigit
   }
   return formatter.format(value);
 }
+
+const dateFormatters = new Map<Locale, Intl.DateTimeFormat>();
+
+/** Calendar date in the locale's medium style, e.g. "4 Oct 2026" / "Oct 4, 2026". */
+export function formatDate(epochMs: number, locale: Locale): string {
+  let formatter = dateFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+    dateFormatters.set(locale, formatter);
+  }
+  return formatter.format(new Date(Number.isFinite(epochMs) ? epochMs : 0));
+}

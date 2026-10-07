@@ -55,6 +55,14 @@ Only permissive licences are allowed, with their notice/credit requirements hono
 | expo-localization | 57.0.2 | MIT | node_modules/expo-localization/package.json | T0.6 |
 | i18next | 26.4.2 | MIT | node_modules/i18next/package.json | T0.6 |
 | react-i18next | 17.0.15 | MIT | node_modules/react-i18next/package.json | T0.6 |
+| @shopify/flash-list | 2.0.2 | MIT | node_modules/@shopify/flash-list/package.json | T1.3 |
+| tslib (transitive, flash-list) | 2.8.1 | 0BSD | node_modules/tslib/package.json | T1.3 |
+| react-native-svg | 15.15.4 | MIT | node_modules/react-native-svg/package.json | T1.3 |
+| css-select, css-what, domhandler, domutils, nth-check, domelementtype, entities (transitive, react-native-svg) | 5.2.2, 6.2.2, 5.0.3, 3.2.2, 2.1.1, 2.3.0, 6.0.1 | BSD-2-Clause | node_modules/*/package.json | T1.3 |
+| entities (nested copy pulled by dom-serializer, transitive, react-native-svg) | 4.5.0 | BSD-2-Clause | node_modules/dom-serializer/node_modules/entities/package.json | T1.3 |
+| css-tree, dom-serializer, warn-once (transitive, react-native-svg) | 1.1.3, 2.0.0, 0.1.1 | MIT | node_modules/*/package.json | T1.3 |
+| boolbase / mdn-data / source-map (transitive, react-native-svg) | 1.0.0 / 2.0.14 / 0.6.1 | ISC / CC0-1.0 / BSD-3-Clause | node_modules/*/package.json | T1.3 |
+| Material Symbols (icon path data in `src/components/icons.tsx`) | Outlined, wght 400 | Apache-2.0 | github.com/google/material-design-icons LICENSE — the Apache-2.0 notice must be shown on the open-source notices screen (T7.5) | T1.3 |
 
 ## Transitive dependency notes
 

@@ -16,12 +16,14 @@ export {
 export {
   APP_PACKAGE,
   DEFAULT_SCAN_EXTS,
+  MY_FILES_DIR_NAME,
   SCANS_DIR_NAME,
   classifySource,
   extForMime,
   mimeForExt,
   toNewFile,
 } from './classify';
+export { EXT_GROUPS, GROUP_EXTS, GROUPED_EXTS, extGroupOf, type ExtGroup } from './extGroups';
 export {
   DEFAULT_PICK_MIME_TYPES,
   listPersistedUris,

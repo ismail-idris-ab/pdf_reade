@@ -15,8 +15,10 @@ import {
   indexLibrary,
   isContentUri,
   isIndexing,
+  mergePickedDuplicates,
   pickedGrantLimit,
   prunePickedDocuments,
+  useLibraryVersionStore,
 } from '@/lib/library';
 
 jest.mock('../../modules/file-index/src/FileIndexModule', () =>
@@ -67,6 +69,7 @@ beforeEach(() => {
   native.hasAllFilesAccess.mockImplementation(() => true);
   native.startScan.mockImplementation(() => Promise.resolve('scan-1'));
   native.listPersistedUris.mockImplementation(() => []);
+  native.releasePersistedUri.mockImplementation(() => undefined);
   repos = createRepositories(createTestDatabase().db);
 });
 
@@ -95,6 +98,7 @@ describe('indexLibrary', () => {
       upserted: 0,
       removed: 0,
       scanned: 3,
+      merged: 0,
     });
   });
 
@@ -113,6 +117,7 @@ describe('indexLibrary', () => {
       upserted: 2,
       removed: 1,
       scanned: 3,
+      merged: 0,
     });
     expect(repos.files.getByPath(`${DOWNLOAD}/new.pdf`)).toMatchObject({
       name: 'new.pdf',
@@ -199,8 +204,8 @@ describe('indexLibrary batch writes', () => {
     native.emitBatch({ scanId: 'scan-1', files: [scanned('c.pdf')] });
     native.emitComplete(complete({ deleted: [`${DOWNLOAD}/old1.pdf`, `${DOWNLOAD}/old2.pdf`] }));
     await expect(run).resolves.toMatchObject({ upserted: 3, removed: 2 });
-    // Two batches + one deletion pass.
-    expect(transaction).toHaveBeenCalledTimes(3);
+    // Two batches + one deletion pass + one duplicate-merge pass.
+    expect(transaction).toHaveBeenCalledTimes(4);
   });
 
   it('rolls back a whole batch when one row fails, keeping earlier batches', async () => {
@@ -396,5 +401,213 @@ describe('prunePickedDocuments', () => {
     expect(repos.files.getByPath('content://p/kept')).toBeDefined();
     expect(repos.files.getByPath('content://p/lost')).toBeUndefined();
     expect(repos.files.getByPath(`${DOWNLOAD}/a.pdf`)).toBeDefined();
+  });
+});
+
+describe('duplicate picked documents', () => {
+  const pickedCopy = (uri: string, name: string, overrides: Partial<NewFile> = {}): NewFile => ({
+    path: uri,
+    uri,
+    name,
+    ext: 'pdf',
+    mime: 'application/pdf',
+    size: 100,
+    mtime: 1_000,
+    source: 'device',
+    ...overrides,
+  });
+
+  it('a completed scan folds a pick into the scanned row and keeps its grant as fallback', async () => {
+    const pickedRow = repos.files.upsert(pickedCopy(PICKED_URI, 'cv.pdf'));
+    repos.files.setFavorite(pickedRow.id, true);
+    repos.files.markOpened(pickedRow.id, 7_000);
+
+    const run = indexLibrary(repos);
+    await flush();
+    native.emitBatch({ scanId: 'scan-1', files: [scanned('cv.pdf')] });
+    native.emitComplete(complete());
+
+    await expect(run).resolves.toMatchObject({ status: 'completed', upserted: 1, merged: 1 });
+    // The document must stay openable if all-files access is revoked later.
+    expect(native.releasePersistedUri).not.toHaveBeenCalled();
+    expect(repos.files.getByPath(PICKED_URI)).toBeUndefined();
+    expect(repos.files.getByPath(`${DOWNLOAD}/cv.pdf`)).toMatchObject({
+      uri: PICKED_URI,
+      isFavorite: true,
+      lastOpenedAt: 7_000,
+    });
+  });
+
+  it('a rescan keeps the fallback uri', async () => {
+    repos.files.upsert({ ...fileRow(`${DOWNLOAD}/cv.pdf`), uri: PICKED_URI });
+    const run = indexLibrary(repos);
+    await flush();
+    native.emitBatch({ scanId: 'scan-1', files: [scanned('cv.pdf', 2_000)] });
+    native.emitComplete(complete());
+    await run;
+    expect(repos.files.getByPath(`${DOWNLOAD}/cv.pdf`)).toMatchObject({
+      mtime: 2_000,
+      uri: PICKED_URI,
+    });
+  });
+
+  it('releases only a grant no row uses any more after commit', () => {
+    repos.files.upsert({ ...fileRow(`${DOWNLOAD}/cv.pdf`), uri: 'content://p/first' });
+    repos.files.upsert(pickedCopy('content://p/second', 'cv.pdf'));
+    native.releasePersistedUri.mockImplementation((uri) => {
+      expect(repos.files.getByPath(uri)).toBeUndefined();
+    });
+    expect(mergePickedDuplicates(repos)).toBe(1);
+    expect(native.releasePersistedUri.mock.calls).toEqual([['content://p/second']]);
+    expect(repos.files.getByPath(`${DOWNLOAD}/cv.pdf`)?.uri).toBe('content://p/first');
+  });
+
+  it('picking a file the scan already indexed merges it at once', () => {
+    const scannedRow = repos.files.upsert(fileRow(`${DOWNLOAD}/cv.pdf`));
+    const result = addPickedDocuments(
+      repos,
+      [picked({ uri: PICKED_URI, name: 'cv.pdf', size: 100, mtime: 1_000 })],
+      pickOptions,
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(repos.files.getByPath(PICKED_URI)).toBeUndefined();
+    expect(repos.files.getById(scannedRow.id)?.uri).toBe(PICKED_URI);
+    expect(native.releasePersistedUri).not.toHaveBeenCalled();
+  });
+
+  it('a pick without a provider mtime merges on name and size', () => {
+    const scannedRow = repos.files.upsert(fileRow(`${DOWNLOAD}/cv.pdf`));
+    addPickedDocuments(
+      repos,
+      [picked({ uri: PICKED_URI, name: 'cv.pdf', size: 100, mtime: null })],
+      pickOptions,
+    );
+    expect(repos.files.getByPath(PICKED_URI)).toBeUndefined();
+    expect(repos.files.getById(scannedRow.id)?.uri).toBe(PICKED_URI);
+  });
+
+  it('a pick with a different provider mtime is kept separate', () => {
+    repos.files.upsert(fileRow(`${DOWNLOAD}/cv.pdf`));
+    addPickedDocuments(
+      repos,
+      [picked({ uri: PICKED_URI, name: 'cv.pdf', size: 100, mtime: 99_000 })],
+      pickOptions,
+    );
+    expect(repos.files.getByPath(PICKED_URI)).toBeDefined();
+  });
+
+  it('does not merge on a cancelled scan', async () => {
+    repos.files.upsert(fileRow(`${DOWNLOAD}/cv.pdf`));
+    repos.files.upsert(pickedCopy(PICKED_URI, 'cv.pdf'));
+    const controller = new AbortController();
+    const run = indexLibrary(repos, { signal: controller.signal });
+    await flush();
+    controller.abort();
+    native.emitComplete(complete());
+    await expect(run).resolves.toEqual({ status: 'cancelled', upserted: 0 });
+    expect(repos.files.getByPath(PICKED_URI)).toBeDefined();
+  });
+
+  it('releases nothing and keeps every row when the merge fails', () => {
+    const { db, sqlite } = createTestDatabase();
+    repos = createRepositories(db);
+    repos.files.upsert({ ...fileRow(`${DOWNLOAD}/cv.pdf`), uri: 'content://p/first' });
+    repos.files.upsert(pickedCopy(PICKED_URI, 'cv.pdf'));
+    sqlite.exec(`CREATE TRIGGER block_delete BEFORE DELETE ON files
+      BEGIN SELECT RAISE(ABORT, 'blocked'); END;`);
+
+    expect(() => mergePickedDuplicates(repos)).toThrow(AppError);
+    expect(native.releasePersistedUri).not.toHaveBeenCalled();
+    expect(repos.files.getByPath(PICKED_URI)).toBeDefined();
+  });
+
+  it('keeps the merge when releasing an unused grant fails', () => {
+    repos.files.upsert({ ...fileRow(`${DOWNLOAD}/cv.pdf`), uri: 'content://p/first' });
+    repos.files.upsert(pickedCopy(PICKED_URI, 'cv.pdf'));
+    native.releasePersistedUri.mockImplementation(() => {
+      throw new Error('provider gone');
+    });
+    expect(mergePickedDuplicates(repos)).toBe(1);
+    expect(repos.files.getByPath(PICKED_URI)).toBeUndefined();
+  });
+});
+
+describe('fallback uris and the grant cap / prune', () => {
+  it('counts a fallback grant as in use, not as an orphan', () => {
+    repos.files.upsert({ ...fileRow(`${DOWNLOAD}/a.pdf`), uri: 'content://p/fallback' });
+    native.listPersistedUris.mockImplementation(() => ['content://p/fallback']);
+    const result = addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
+      ...pickOptions,
+      grantLimit: 2,
+    });
+    expect(result.evicted).toBe(0);
+    expect(native.releasePersistedUri).not.toHaveBeenCalled();
+  });
+
+  it('evicting a fallback grant only clears the uri; the row stays', () => {
+    const row = repos.files.upsert({
+      ...fileRow(`${DOWNLOAD}/a.pdf`, 1),
+      uri: 'content://p/fallback',
+    });
+    native.listPersistedUris.mockImplementation(() => ['content://p/fallback']);
+    const result = addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
+      ...pickOptions,
+      grantLimit: 1,
+    });
+    expect(result.evicted).toBe(0);
+    expect(native.releasePersistedUri.mock.calls).toEqual([['content://p/fallback']]);
+    expect(repos.files.getById(row.id)).toMatchObject({ path: `${DOWNLOAD}/a.pdf`, uri: null });
+  });
+
+  it('prune clears a lost fallback uri instead of deleting the path row', () => {
+    const kept = repos.files.upsert({ ...fileRow(`${DOWNLOAD}/a.pdf`), uri: 'content://p/kept' });
+    const lost = repos.files.upsert({ ...fileRow(`${DOWNLOAD}/b.pdf`), uri: 'content://p/lost' });
+    native.listPersistedUris.mockImplementation(() => ['content://p/kept']);
+    expect(prunePickedDocuments(repos)).toBe(0);
+    expect(repos.files.getById(kept.id)?.uri).toBe('content://p/kept');
+    expect(repos.files.getById(lost.id)).toMatchObject({ path: `${DOWNLOAD}/b.pdf`, uri: null });
+  });
+});
+
+describe('library version', () => {
+  const version = () => useLibraryVersionStore.getState().version;
+
+  it('is bumped when a scan changed rows, and not when nothing changed', async () => {
+    let start = version();
+    let run = indexLibrary(repos);
+    await flush();
+    native.emitComplete(complete());
+    await run;
+    expect(version()).toBe(start);
+
+    start = version();
+    run = indexLibrary(repos);
+    await flush();
+    native.emitBatch({ scanId: 'scan-1', files: [scanned('a.pdf')] });
+    native.emitComplete(complete());
+    await run;
+    expect(version()).toBe(start + 1);
+  });
+
+  it('is bumped when a failing scan already wrote rows', async () => {
+    const start = version();
+    const run = indexLibrary(repos);
+    await flush();
+    native.emitBatch({ scanId: 'scan-1', files: [scanned('a.pdf')] });
+    native.emitError({ scanId: 'scan-1', code: 'ERR_IO', message: 'boom' });
+    await expect(run).rejects.toBeInstanceOf(AppError);
+    expect(version()).toBe(start + 1);
+  });
+
+  it('is bumped by picks and by prunes that removed rows', () => {
+    const start = version();
+    addPickedDocuments(repos, [picked()], pickOptions);
+    expect(version()).toBe(start + 1);
+    native.listPersistedUris.mockImplementation(() => [PICKED_URI]);
+    expect(prunePickedDocuments(repos)).toBe(0);
+    expect(version()).toBe(start + 1);
+    native.listPersistedUris.mockImplementation(() => []);
+    expect(prunePickedDocuments(repos)).toBe(1);
+    expect(version()).toBe(start + 2);
   });
 });

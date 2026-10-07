@@ -61,3 +61,43 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `common.errorToast` | {{title}}. {{message}} | {{title}}. {{message}} | {{title}}. {{message}} | T1.2 |
 | `library.evictedOldPicks` | To make room, older picked files were removed from your library ({{count}}). Pick them again to get them back. | Don samar da wuri, an cire tsofaffin fayilolin da ka zaɓa daga ɗakin karatu ({{count}}). Ka sake zaɓar su don dawo da su. | Pour faire de la place, d’anciens fichiers choisis ont été retirés de la bibliothèque ({{count}}). Choisissez-les à nouveau pour les récupérer. | T1.2 |
 | `library.cannotKeepAccess` | Some files couldn’t be added: their source app doesn’t allow lasting access. Try saving them to your phone first. | Ba a iya ƙara wasu fayiloli ba: manhajar da suka fito ba ta ba da izini na dindindin. Ka gwada ajiye su a wayarka da farko. | Certains fichiers n’ont pas pu être ajoutés : leur application d’origine n’autorise pas un accès durable. Essayez d’abord de les enregistrer sur votre téléphone. | T1.2 |
+| `library.searchPlaceholder` | Search by name | Nemo da suna | Rechercher par nom | T1.3 |
+| `library.clearSearch` | Clear search | Share bincike | Effacer la recherche | T1.3 |
+| `library.showGrid` | Show as grid | Nuna cikin akwatuna | Afficher en grille | T1.3 |
+| `library.showList` | Show as list | Nuna a jere | Afficher en liste | T1.3 |
+| `library.sort` | Sort | Tsara | Trier | T1.3 |
+| `library.sortBy` | Sort by | Tsara ta | Trier par | T1.3 |
+| `library.order` | Order | Jeri | Ordre | T1.3 |
+| `library.devTools` | Developer tools | Kayan masu haɓakawa | Outils de développement | T1.3 |
+| `library.tabsLabel` | File types | Nau’ukan fayil | Types de fichiers | T1.3 |
+| `library.chipsLabel` | Sources | Majiya | Sources | T1.3 |
+| `library.tabs.all` | All | Duka | Tous | T1.3 |
+| `library.tabs.pdf` | PDF | PDF | PDF | T1.3 |
+| `library.tabs.word` | Word | Word | Word | T1.3 |
+| `library.tabs.excel` | Excel | Excel | Excel | T1.3 |
+| `library.tabs.other` | Other | Sauran | Autres | T1.3 |
+| `library.chips.all` | All | Duka | Tous | T1.3 |
+| `library.chips.downloads` | Downloads | Abubuwan da aka sauke | Téléchargements | T1.3 |
+| `library.chips.whatsapp` | WhatsApp | WhatsApp | WhatsApp | T1.3 |
+| `library.chips.scans` | Scans | Sikan | Numérisations | T1.3 |
+| `library.chips.myfiles` | My Files | Fayilolina | Mes fichiers | T1.3 |
+| `library.sortField.name` | Name | Suna | Nom | T1.3 |
+| `library.sortField.date` | Date modified | Ranar gyara | Date de modification | T1.3 |
+| `library.sortField.size` | Size | Girma | Taille | T1.3 |
+| `library.sortDir.name.asc` | A to Z | A zuwa Z | De A à Z | T1.3 |
+| `library.sortDir.name.desc` | Z to A | Z zuwa A | De Z à A | T1.3 |
+| `library.sortDir.date.asc` | Oldest first | Mafi tsufa da farko | Plus anciens d’abord | T1.3 |
+| `library.sortDir.date.desc` | Newest first | Mafi sabo da farko | Plus récents d’abord | T1.3 |
+| `library.sortDir.size.asc` | Smallest first | Mafi ƙanƙanta da farko | Plus petits d’abord | T1.3 |
+| `library.sortDir.size.desc` | Largest first | Mafi girma da farko | Plus grands d’abord | T1.3 |
+| `library.recent` | Recent | Na baya-bayan nan | Récents | T1.3 |
+| `library.favorites` | Favorites | Waɗanda aka fi so | Favoris | T1.3 |
+| `library.fileDetails` | {{size}} · {{date}} | {{size}} · {{date}} | {{size}} · {{date}} | T1.3 |
+| `library.locked` | Password-protected | Yana da kalmar sirri | Protégé par mot de passe | T1.3 |
+| `library.empty.noFilesTitle` | No documents yet | Babu takardu tukuna | Aucun document pour l’instant | T1.3 |
+| `library.empty.noFilesMessage` | Pick files from your phone to add them here. | Zaɓi fayiloli daga wayarka don ƙara su nan. | Choisissez des fichiers sur votre téléphone pour les ajouter ici. | T1.3 |
+| `library.empty.pickFiles` | Pick files | Zaɓi fayiloli | Choisir des fichiers | T1.3 |
+| `library.empty.noFilesHereTitle` | No files here yet | Babu fayiloli a nan tukuna | Aucun fichier ici pour l’instant | T1.3 |
+| `library.empty.noFilesHereMessage` | Try another file type or source. | Gwada wani nau’in fayil ko wata majiya. | Essayez un autre type de fichier ou une autre source. | T1.3 |
+| `library.empty.noMatchesTitle` | No matching files | Babu fayil da ya dace | Aucun fichier correspondant | T1.3 |
+| `library.empty.noMatchesMessage` | Try a different name, or check the file type and source. | Gwada wani suna, ko duba nau’in fayil da majiya. | Essayez un autre nom, ou vérifiez le type de fichier et la source. | T1.3 |

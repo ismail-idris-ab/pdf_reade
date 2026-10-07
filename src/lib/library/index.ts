@@ -1,7 +1,8 @@
-import type { Repositories } from '@/db/repositories';
+import type { MergeContentResult, Repositories } from '@/db/repositories';
 import type { FileRow } from '@/db/types';
 import { Platform } from 'react-native';
 
+import { reportError } from '@/lib/crash';
 import { toAppError } from '@/lib/errors';
 import {
   DEFAULT_SCAN_EXTS,
@@ -16,11 +17,20 @@ import {
   type ScanSummary,
 } from '@/lib/files';
 
-// Library rule: every content:// row in the files table holds a persisted
-// read grant (taken by the picker). Transient URIs, such as those from "Open
-// with" or the share target (T1.6), must be copied into the cache with
-// copyContentUriToCache and stored by that file path instead, so that
-// prunePickedDocuments only ever removes rows whose grant was truly lost.
+import { bumpLibraryVersion } from './version';
+
+export { bumpLibraryVersion, useLibraryVersion, useLibraryVersionStore } from './version';
+
+// Library rule: every content:// URI stored in the files table holds a
+// persisted read grant taken by the picker. That is either a picked row's
+// path (path = uri = the content:// URI) or the fallback `uri` of a scanned
+// path row that a pick of the same file was merged into
+// (mergePickedDuplicates): the fallback keeps that document openable without
+// all-files access, so its grant is kept and counts as in use. Transient URIs,
+// such as those from "Open with" or the share target (T1.6), must be copied
+// into the cache with copyContentUriToCache and stored by that file path
+// instead, so that prunePickedDocuments only ever drops URIs whose grant was
+// truly lost.
 
 /** True for Storage Access Framework URIs (files picked or opened from another app). */
 export function isContentUri(path: string): boolean {
@@ -41,7 +51,14 @@ function isFilesystemPath(path: string): boolean {
  *   deletions are applied because a partial walk cannot prove a file is gone.
  */
 export type IndexLibraryResult =
-  | { status: 'completed'; upserted: number; removed: number; scanned: number }
+  | {
+      status: 'completed';
+      upserted: number;
+      removed: number;
+      scanned: number;
+      /** Picked rows folded into the scanned row of the same file. */
+      merged: number;
+    }
   | { status: 'cancelled'; upserted: number }
   | { status: 'permissionDenied' };
 
@@ -59,8 +76,11 @@ export function isIndexing(): boolean {
 /**
  * Scans shared storage and brings the `files` table in line with it: new and
  * changed documents are upserted, rows for deleted files are removed. Only
- * filesystem-path rows take part; picked (content://) rows are never read or
- * removed here.
+ * filesystem-path rows take part in that; the one exception for picked
+ * (content://) rows is that, after a completed scan, a picked row whose file
+ * the scan also found is merged into that file's row (mergePickedDuplicates).
+ * Mounted library screens are told about changes (bumpLibraryVersion) during
+ * the scan, throttled, and once at the end.
  *
  * Runs never overlap: while a run is in progress, further calls return that
  * run's promise (their options are ignored).
@@ -81,6 +101,10 @@ export function indexLibrary(
   return run;
 }
 
+// While a scan streams batches, mounted library screens are told at most this
+// often (each change makes them re-read the whole list, after interactions).
+const BUMP_INTERVAL_MS = 3000;
+
 async function runIndex(
   repos: Repositories,
   { signal }: IndexLibraryOptions,
@@ -93,6 +117,9 @@ async function runIndex(
   }
 
   let upserted = 0;
+  let lastBump = Date.now();
+  // Whether rows changed since screens were last told.
+  let dirty = false;
   const handle = scanDocuments({
     exts: DEFAULT_SCAN_EXTS,
     knownMtimes,
@@ -104,23 +131,68 @@ async function runIndex(
         .map((file) => toNewFile(file));
       repos.files.upsertMany(rows);
       upserted += rows.length;
+      if (rows.length === 0) return;
+      dirty = true;
+      if (Date.now() - lastBump >= BUMP_INTERVAL_MS) {
+        lastBump = Date.now();
+        dirty = false;
+        bumpLibraryVersion();
+      }
     },
   });
 
-  let summary: ScanSummary;
   try {
-    summary = await handle.result;
-  } catch (error) {
-    const appError = toAppError(error);
-    if (appError.code === 'PERMISSION_DENIED') return { status: 'permissionDenied' };
-    if (appError.code === 'CANCELLED') return { status: 'cancelled', upserted };
-    throw appError;
-  }
-  if (summary.cancelled) return { status: 'cancelled', upserted };
+    let summary: ScanSummary;
+    try {
+      summary = await handle.result;
+    } catch (error) {
+      const appError = toAppError(error);
+      if (appError.code === 'PERMISSION_DENIED') return { status: 'permissionDenied' };
+      if (appError.code === 'CANCELLED') return { status: 'cancelled', upserted };
+      throw appError;
+    }
+    if (summary.cancelled) return { status: 'cancelled', upserted };
 
-  // One transaction for all deletions.
-  const removed = repos.files.removeByPaths(summary.deleted.filter(isFilesystemPath));
-  return { status: 'completed', upserted, removed, scanned: summary.scanned };
+    // One transaction for all deletions.
+    const removed = repos.files.removeByPaths(summary.deleted.filter(isFilesystemPath));
+    if (removed > 0) dirty = true;
+    const merged = mergePickedDuplicates(repos);
+    if (merged > 0) dirty = true;
+    return { status: 'completed', upserted, removed, scanned: summary.scanned, merged };
+  } finally {
+    if (dirty) bumpLibraryVersion();
+  }
+}
+
+/**
+ * Folds picked (content://) rows into the scanned row of the same file
+ * (FilesRepository.mergeContentDuplicates), so a document is listed once.
+ * The picked URI is kept as the path row's fallback `uri` and its grant is
+ * kept (see the library rule above). The database changes commit together;
+ * only then are grants released, and only those no row uses any more (the
+ * path row already had another fallback). A release failure is reported, not
+ * thrown: the row is already gone, and an orphan grant is reclaimed by
+ * enforceGrantLimit later. If the transaction fails nothing is released and
+ * the AppError is thrown. Returns the number of rows merged.
+ */
+export function mergePickedDuplicates(
+  repos: Repositories,
+  options: { withoutMtime?: readonly string[] } = {},
+): number {
+  let result: MergeContentResult;
+  try {
+    result = repos.files.mergeContentDuplicates(options);
+  } catch (error) {
+    throw toAppError(error);
+  }
+  for (const uri of result.release) {
+    try {
+      if (!repos.files.isGrantInUse(uri)) releasePersistedUri(uri);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+  return result.merged.length;
 }
 
 export type AddPickedDocumentsOptions = {
@@ -168,9 +240,11 @@ function extOf(document: PickedDocument): string {
 
 /**
  * Keeps the number of persisted grants (existing plus the new picks) within
- * `limit`. Grants no library row uses are released first; then the least
- * recently used picked rows lose their grant and are removed, only as many
- * as needed. New picks are never evicted. Returns the number of rows removed.
+ * `limit`. Grants no library row uses (as a picked path or a fallback uri)
+ * are released first; then the least recently used grants go, only as many
+ * as needed: a picked row loses its grant and is removed, a scanned row only
+ * loses its fallback uri (it stays listed). New picks are never evicted.
+ * Returns the number of rows removed.
  *
  * The picker has already taken the new grants, so they may or may not be in
  * listPersistedUris() yet; counting the union handles both.
@@ -181,8 +255,8 @@ function enforceGrantLimit(repos: Repositories, newUris: readonly string[], limi
   let excess = persisted.size - limit;
   if (excess <= 0) return 0;
 
-  const byAge = repos.files.listContentUrisByAge().filter((row) => !fresh.has(row.path));
-  const inLibrary = new Set(byAge.map((row) => row.path));
+  const byAge = repos.files.listGrantsByAge().filter((row) => !fresh.has(row.grant));
+  const inLibrary = new Set(byAge.map((row) => row.grant));
   for (const uri of persisted) {
     if (excess <= 0) break;
     if (fresh.has(uri) || inLibrary.has(uri)) continue;
@@ -190,15 +264,25 @@ function enforceGrantLimit(repos: Repositories, newUris: readonly string[], limi
     excess -= 1;
   }
 
-  const evict: string[] = [];
+  // A grant can back several rows (a pick and a fallback); evicting it drops
+  // it from all of them.
+  const evicted = new Set<string>();
   for (const row of byAge) {
     if (excess <= 0) break;
-    if (!persisted.has(row.path)) continue;
-    evict.push(row.path);
+    if (!persisted.has(row.grant) || evicted.has(row.grant)) continue;
+    evicted.add(row.grant);
     excess -= 1;
   }
-  for (const uri of evict) releasePersistedUri(uri);
-  return repos.files.removeByPaths(evict);
+  const evictRows: string[] = [];
+  const evictFallbacks: number[] = [];
+  for (const row of byAge) {
+    if (!evicted.has(row.grant)) continue;
+    if (row.picked) evictRows.push(row.grant);
+    else evictFallbacks.push(row.id);
+  }
+  for (const uri of evicted) releasePersistedUri(uri);
+  repos.files.clearFallbackUris(evictFallbacks);
+  return repos.files.removeByPaths(evictRows);
 }
 
 /**
@@ -237,19 +321,39 @@ export function addPickedDocuments(
       };
     }),
   );
+  // Fold picks of files the scan already indexed into those rows (cheap).
+  // Opportunistic: the picks are stored either way, so a failure is only
+  // reported and the next completed scan retries.
+  try {
+    mergePickedDuplicates(repos, {
+      withoutMtime: keep
+        .filter((document) => document.mtime === null)
+        .map((document) => document.uri),
+    });
+  } catch (error) {
+    reportError(error);
+  }
+  bumpLibraryVersion();
   return { rows, notPersisted, evicted };
 }
 
 /**
- * Removes content:// rows whose persisted permission is gone (revoked by the
- * user or the provider), so the library never lists files it cannot open.
- * Returns the number of rows removed.
+ * Drops content:// URIs whose persisted permission is gone (revoked by the
+ * user or the provider): picked rows are removed, so the library never lists
+ * files it cannot open; a scanned row only loses its fallback uri (its path
+ * still works with all-files access). Returns the number of rows removed.
  */
 export function prunePickedDocuments(repos: Repositories): number {
   const persisted = new Set(listPersistedUris());
-  const lost = repos.files
-    .listIndexEntries()
-    .filter((entry) => isContentUri(entry.path) && !persisted.has(entry.path))
-    .map((entry) => entry.path);
-  return repos.files.removeByPaths(lost);
+  const lostRows: string[] = [];
+  const lostFallbacks: number[] = [];
+  for (const entry of repos.files.listGrantsByAge()) {
+    if (persisted.has(entry.grant)) continue;
+    if (entry.picked) lostRows.push(entry.grant);
+    else lostFallbacks.push(entry.id);
+  }
+  repos.files.clearFallbackUris(lostFallbacks);
+  const removed = repos.files.removeByPaths(lostRows);
+  if (removed > 0) bumpLibraryVersion();
+  return removed;
 }

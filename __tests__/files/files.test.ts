@@ -64,6 +64,15 @@ describe('classifySource', () => {
   });
 
   it.each([
+    `/data/user/0/${APP_PACKAGE}/files/MyFiles/notes.pdf`,
+    `/data/data/${APP_PACKAGE}/files/MyFiles/Sub/notes.pdf`,
+    `/storage/emulated/0/Android/data/${APP_PACKAGE}/files/MyFiles/notes.pdf`,
+    `file:///data/user/0/${APP_PACKAGE}/files/myfiles/notes.pdf`,
+  ])('%s -> myfiles', (input) => {
+    expect(classifySource(input)).toBe('myfiles');
+  });
+
+  it.each([
     '/storage/emulated/0/Download2/report.pdf',
     '/storage/emulated/0/MyDownload/report.pdf',
     '/storage/emulated/0/Downloads/report.pdf',
@@ -75,6 +84,9 @@ describe('classifySource', () => {
     `/data/user/0/${APP_PACKAGE}/files/Scans2/scan.pdf`,
     `/data/user/0/${APP_PACKAGE}/cache/Scans/scan.pdf`,
     '/data/user/0/com.other.app/files/Scans/scan.pdf',
+    `/data/user/0/${APP_PACKAGE}/files/MyFiles2/notes.pdf`,
+    '/data/user/0/com.other.app/files/MyFiles/notes.pdf',
+    '/storage/emulated/0/MyFiles/notes.pdf',
     '/storage/emulated/0/Scans/scan.pdf',
     '/storage/emulated/0/Documents/cv.pdf',
   ])('%s -> device', (input) => {

@@ -1,0 +1,309 @@
+import { FlashList, type ListRenderItem } from '@shopify/flash-list';
+import Constants from 'expo-constants';
+import { router } from 'expo-router';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { AccessBanner } from '@/components/AccessBanner';
+import {
+  CloseIcon,
+  DevIcon,
+  FileIcon,
+  GridIcon,
+  ListIcon,
+  SearchIcon,
+  SortIcon,
+} from '@/components/icons';
+import { EmptyState, IconButton } from '@/components/ui';
+import type { LibraryFile } from '@/db/repositories';
+import { useFormatDate, useFormatFileSize, useTranslation } from '@/i18n';
+import { toRecoveryLabel, toUserMessage } from '@/lib/errors';
+import { bumpLibraryVersion } from '@/lib/library/version';
+import { useTheme } from '@/theme';
+
+import { LibraryTabs, SourceChips } from './components/Filters';
+import { FileListRow, FileTile, type FormatDetails } from './components/FileItems';
+import { FileShelf } from './components/FileShelf';
+import { SortSheet } from './components/SortSheet';
+import { useLibraryPrefsStore } from './store';
+import { showsShelves } from './filters';
+import { useDebouncedValue, useLibraryData, type LibraryData } from './useLibraryData';
+import { usePickFiles } from './usePickFiles';
+
+const SEARCH_DEBOUNCE_MS = 150;
+// Grid: side padding of the list and the narrowest column, dp.
+const GRID_PADDING = 8;
+const MIN_COLUMN_WIDTH = 112;
+// Horizontal padding inside a grid cell (FileTile's p-2 on both sides), dp.
+const CELL_INSET = 16;
+
+const keyExtractor = (file: LibraryFile) => String(file.id);
+const GRID_CONTENT = { paddingHorizontal: GRID_PADDING };
+
+function useFormatDetails(): FormatDetails {
+  const { t } = useTranslation();
+  const formatSize = useFormatFileSize();
+  const formatDate = useFormatDate();
+  return useCallback(
+    (file: LibraryFile) =>
+      t('library.fileDetails', { size: formatSize(file.size), date: formatDate(file.mtime) }),
+    [t, formatSize, formatDate],
+  );
+}
+
+/**
+ * The library (home screen): every indexed and picked document, filtered by
+ * type tab and source chip, searchable by name, as a list or a grid. Rows
+ * are not pressable until the reader exists (T2.3).
+ */
+export function LibraryScreen() {
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const view = useLibraryPrefsStore((state) => state.view);
+  const sort = useLibraryPrefsStore((state) => state.sort);
+  const sortDir = useLibraryPrefsStore((state) => state.sortDir);
+  const tab = useLibraryPrefsStore((state) => state.tab);
+  const chip = useLibraryPrefsStore((state) => state.chip);
+  const setTab = useLibraryPrefsStore((state) => state.setTab);
+  const setChip = useLibraryPrefsStore((state) => state.setChip);
+
+  const [search, setSearch] = useState('');
+  const debounced = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
+  // Clearing applies at once; typing waits for a pause.
+  const query = search.trim() === '' ? '' : debounced;
+  const filters = { tab, chip, sort, sortDir, query };
+  const { i18n } = useTranslation();
+  const data = useLibraryData(filters, i18n.language);
+  const shelves = showsShelves(filters);
+  const [sortOpen, setSortOpen] = useState(false);
+  const formatDetails = useFormatDetails();
+
+  const columns = Math.min(
+    6,
+    Math.max(2, Math.floor((width - GRID_PADDING * 2) / MIN_COLUMN_WIDTH)),
+  );
+  const tileWidth = Math.floor((width - GRID_PADDING * 2) / columns) - CELL_INSET;
+
+  const renderItem: ListRenderItem<LibraryFile> = useCallback(
+    ({ item }) =>
+      view === 'grid' ? (
+        <FileTile
+          testID={`library-cell-${item.id}`}
+          file={item}
+          formatDetails={formatDetails}
+          width={tileWidth}
+        />
+      ) : (
+        <FileListRow file={item} formatDetails={formatDetails} />
+      ),
+    [view, formatDetails, tileWidth],
+  );
+  const getItemType = useCallback(() => view, [view]);
+
+  const recent = data.status === 'ready' ? data.recent : EMPTY;
+  const favorites = data.status === 'ready' ? data.favorites : EMPTY;
+  const header = useMemo(
+    () => (
+      <ListHeader
+        shelves={shelves}
+        recent={recent}
+        favorites={favorites}
+        formatDetails={formatDetails}
+      />
+    ),
+    [shelves, recent, favorites, formatDetails],
+  );
+
+  return (
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+      <TopBar search={search} onSearch={setSearch} onOpenSort={() => setSortOpen(true)} />
+      <LibraryTabs value={tab} onChange={setTab} />
+      <SourceChips value={chip} onChange={setChip} />
+      <FlashList
+        // Switching between list and grid (or the column count) remounts
+        // the list so no recycled cell of the other layout is reused.
+        key={view === 'grid' ? `grid-${columns}` : 'list'}
+        testID="library-list"
+        data={data.status === 'ready' ? data.items : EMPTY}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        getItemType={getItemType}
+        numColumns={view === 'grid' ? columns : 1}
+        contentContainerStyle={view === 'grid' ? GRID_CONTENT : undefined}
+        ListHeaderComponent={header}
+        ListEmptyComponent={<LibraryEmpty data={data} searching={query !== ''} />}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      />
+      <SortSheet visible={sortOpen} onClose={() => setSortOpen(false)} />
+    </View>
+  );
+}
+
+const EMPTY: readonly LibraryFile[] = [];
+
+type TopBarProps = {
+  search: string;
+  onSearch: (text: string) => void;
+  onOpenSort: () => void;
+};
+
+function TopBar({ search, onSearch, onOpenSort }: TopBarProps) {
+  const { t } = useTranslation();
+  const { palette } = useTheme();
+  const view = useLibraryPrefsStore((state) => state.view);
+  const setView = useLibraryPrefsStore((state) => state.setView);
+  const appName = Constants.expoConfig?.name ?? '';
+
+  return (
+    <View className="gap-2 px-2 pb-2">
+      <View className="flex-row items-center">
+        <Text
+          accessibilityRole="header"
+          numberOfLines={1}
+          className="flex-1 px-2 text-2xl font-semibold text-foreground"
+        >
+          {appName}
+        </Text>
+        {__DEV__ ? (
+          <IconButton
+            testID="library-dev"
+            icon={<DevIcon color={palette.foreground} />}
+            accessibilityLabel={t('library.devTools')}
+            onPress={() => router.push('/dev')}
+          />
+        ) : null}
+        <IconButton
+          testID="library-view-toggle"
+          icon={
+            view === 'list' ? (
+              <GridIcon color={palette.foreground} />
+            ) : (
+              <ListIcon color={palette.foreground} />
+            )
+          }
+          accessibilityLabel={view === 'list' ? t('library.showGrid') : t('library.showList')}
+          onPress={() => setView(view === 'list' ? 'grid' : 'list')}
+        />
+        <IconButton
+          testID="library-sort"
+          icon={<SortIcon color={palette.foreground} />}
+          accessibilityLabel={t('library.sort')}
+          onPress={onOpenSort}
+        />
+      </View>
+      <View className="mx-2 min-h-12 flex-row items-center rounded-xl border border-border bg-surface pl-3">
+        <SearchIcon color={palette.muted} size={20} />
+        <TextInput
+          testID="library-search"
+          value={search}
+          onChangeText={onSearch}
+          placeholder={t('library.searchPlaceholder')}
+          placeholderTextColor={palette.muted}
+          accessibilityLabel={t('library.searchPlaceholder')}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          className="min-h-12 flex-1 px-2 text-base text-foreground"
+        />
+        {search !== '' ? (
+          <IconButton
+            testID="library-search-clear"
+            icon={<CloseIcon color={palette.muted} size={20} />}
+            accessibilityLabel={t('library.clearSearch')}
+            onPress={() => onSearch('')}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+type ListHeaderProps = {
+  shelves: boolean;
+  recent: readonly LibraryFile[];
+  favorites: readonly LibraryFile[];
+  formatDetails: FormatDetails;
+};
+
+const ListHeader = memo(function ListHeader({
+  shelves,
+  recent,
+  favorites,
+  formatDetails,
+}: ListHeaderProps) {
+  const { t } = useTranslation();
+  return (
+    <View className="pb-2">
+      <View className="px-4 pt-2">
+        <AccessBanner />
+      </View>
+      {shelves ? (
+        <>
+          <FileShelf
+            testID="library-recent"
+            title={t('library.recent')}
+            files={recent}
+            formatDetails={formatDetails}
+          />
+          <FileShelf
+            testID="library-favorites"
+            title={t('library.favorites')}
+            files={favorites}
+            formatDetails={formatDetails}
+          />
+        </>
+      ) : null}
+    </View>
+  );
+});
+
+function LibraryEmpty({ data, searching }: { data: LibraryData; searching: boolean }) {
+  const { t } = useTranslation();
+  const { palette } = useTheme();
+  const { pick } = usePickFiles();
+  const icon = <FileIcon color={palette.muted} size={48} />;
+
+  if (data.status === 'error') {
+    const message = toUserMessage(data.error.code);
+    return (
+      <EmptyState
+        testID="library-error"
+        icon={icon}
+        title={message.title}
+        message={message.message}
+        action={{ label: toRecoveryLabel('retry'), onPress: bumpLibraryVersion }}
+      />
+    );
+  }
+  if (data.total === 0 && !searching) {
+    return (
+      <EmptyState
+        testID="library-empty"
+        icon={icon}
+        title={t('library.empty.noFilesTitle')}
+        message={t('library.empty.noFilesMessage')}
+        action={{ label: t('library.empty.pickFiles'), onPress: pick }}
+      />
+    );
+  }
+  if (searching) {
+    return (
+      <EmptyState
+        testID="library-no-matches"
+        icon={<SearchIcon color={palette.muted} size={48} />}
+        title={t('library.empty.noMatchesTitle')}
+        message={t('library.empty.noMatchesMessage')}
+      />
+    );
+  }
+  return (
+    <EmptyState
+      testID="library-filter-empty"
+      icon={icon}
+      title={t('library.empty.noFilesHereTitle')}
+      message={t('library.empty.noFilesHereMessage')}
+    />
+  );
+}

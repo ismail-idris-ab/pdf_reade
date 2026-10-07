@@ -203,7 +203,7 @@ describe('files repository batch writes', () => {
     expect(repos.files.listIndexEntries()).toEqual([]);
   });
 
-  it('lists content:// rows least recently used first', () => {
+  it('lists grants (picked paths and fallback uris) least recently used first', () => {
     const repos = setup();
     const uri = (id: string, mtime: number) =>
       newFile({ path: `content://p/${id}`, uri: `content://p/${id}`, mtime, source: 'device' });
@@ -212,13 +212,29 @@ describe('files repository batch writes', () => {
     repos.files.upsert(uri('never-new', 50));
     repos.files.upsert(uri('never-old', 10));
     repos.files.upsert(at('a.pdf'));
+    const withFallback = repos.files.upsert({
+      ...at('b.pdf'),
+      uri: 'content://p/fallback',
+      mtime: 20,
+    });
     repos.files.markOpened(openedLate.id, 2_000);
     repos.files.markOpened(openedEarly.id, 1_000);
-    expect(repos.files.listContentUrisByAge().map((row) => row.path)).toEqual([
-      'content://p/never-old',
-      'content://p/never-new',
-      'content://p/opened-early',
-      'content://p/opened-late',
+    expect(repos.files.listGrantsByAge()).toEqual([
+      expect.objectContaining({ grant: 'content://p/never-old', picked: true }),
+      { id: withFallback.id, grant: 'content://p/fallback', picked: false },
+      expect.objectContaining({ grant: 'content://p/never-new', picked: true }),
+      expect.objectContaining({ grant: 'content://p/opened-early', picked: true }),
+      expect.objectContaining({ grant: 'content://p/opened-late', picked: true }),
     ]);
+    expect(repos.files.isGrantInUse('content://p/fallback')).toBe(true);
+    expect(repos.files.isGrantInUse('content://p/never-old')).toBe(true);
+    expect(repos.files.isGrantInUse('content://p/unknown')).toBe(false);
+
+    // A rescan (uri null) keeps the fallback; clearing drops only the uri.
+    repos.files.upsert({ ...at('b.pdf'), mtime: 30 });
+    expect(repos.files.getById(withFallback.id)?.uri).toBe('content://p/fallback');
+    expect(repos.files.clearFallbackUris([withFallback.id, openedLate.id])).toBe(1);
+    expect(repos.files.getById(withFallback.id)?.uri).toBeNull();
+    expect(repos.files.getById(openedLate.id)?.uri).toBe('content://p/opened-late');
   });
 });

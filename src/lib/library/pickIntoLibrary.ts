@@ -23,8 +23,9 @@ export async function pickIntoLibrary(
 ): Promise<AddPickedDocumentsResult | null> {
   const picked = await pickDocuments({ mimeTypes: DEFAULT_PICK_MIME_TYPES, multiple: true });
   if (picked.length === 0) return null;
+  // In use already: as a picked row, or as a scanned row's fallback uri.
   const alreadyKept = new Set(
-    picked.filter((document) => repos.files.getByPath(document.uri)).map((d) => d.uri),
+    picked.filter((document) => repos.files.isGrantInUse(document.uri)).map((d) => d.uri),
   );
   try {
     return addPickedDocuments(repos, picked, { now: now(), fallbackName });

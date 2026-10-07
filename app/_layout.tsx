@@ -61,8 +61,8 @@ function ThemedStack() {
   // - Behind onboarding: index (home). Every app route added later must go
   //   inside the first Protected group too.
   // - Before onboarding only: onboarding.
-  // - Unguarded: dev/* (design gallery), intentionally reachable at any time
-  //   in dev builds; in release builds the screen itself redirects to /.
+  // - Unguarded: dev/* (dev tools, design gallery), intentionally reachable at
+  //   any time in dev builds; in release builds each screen redirects to /.
   // When the flag flips, expo-router drops the now-protected screen and lands
   // on the first available one, so there is no redirect to loop on; a deep
   // link to a protected route lands on the first available route instead.
