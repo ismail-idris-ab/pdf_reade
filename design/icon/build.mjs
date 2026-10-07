@@ -5,6 +5,7 @@
 //   download ArchivoBlack-Regular.ttf (SIL OFL 1.1, github.com/google/fonts) as ArchivoBlack.ttf
 //   node build.mjs out        then copy out/*.png into assets/ (play-store-icon-512.png → assets/store/)
 // The year lives in the `mark` tag below; change it there each January and re-render.
+// eslint-disable-next-line import/no-unresolved -- installed only in the scratch folder (see above).
 import { Resvg } from '@resvg/resvg-js';
 import fs from 'node:fs';
 import path from 'node:path';
