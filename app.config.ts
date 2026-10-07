@@ -35,7 +35,8 @@ const config: ExpoConfig = {
     package: ANDROID_PACKAGE,
     versionCode: 1,
     adaptiveIcon: {
-      backgroundColor: '#E6F4FE',
+      // Artwork source: design/icon/build.mjs (concept B: red, page, 2026 tag).
+      backgroundColor: '#E3262B',
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundImage: './assets/android-icon-background.png',
       monochromeImage: './assets/android-icon-monochrome.png',
