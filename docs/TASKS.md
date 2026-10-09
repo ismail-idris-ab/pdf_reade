@@ -46,7 +46,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
   **Done when:** 2,000-item library scrolls at 60fps on low-end device; thumbnails never block scroll.
   Note (from T1.2): Dedupe a picked content:// document with the same file later found by the full scan (match on name + size + mtime) so it doesn't appear twice.
 
-- [ ] **T1.4 File actions + folders** `[launch]`
+- [x] **T1.4 File actions + folders** `[launch]`
   Rename, move, duplicate, details, favorite, share, print, delete. Until T1.5 (recycle bin, post-launch) ships, delete is permanent and always behind a confirmation dialog naming the file. App-managed "My Files" folder with nested folders + import.
 
 - [ ] **T1.5 Recycle bin** `[post-launch]`

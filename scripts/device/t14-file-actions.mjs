@@ -202,18 +202,13 @@ async function main() {
       await ui.back();
       await ui.waitGone(sheetItem(L.unfavorite));
       await setSearch('');
-      const header = await ui.scrollUntil({ text: L.favorites }, { direction: 'up' });
+      // Shelf cards are the only file cards narrower than half the screen
+      // (list rows span the width), so no header position is needed: swipes
+      // can scroll the header away while the card stays visible.
+      await ui.scrollUntil({ text: L.favorites }, { direction: 'up' });
       const screenW = ui.getLastDump().screen.w;
-      const inShelf = (n) =>
-        n.bounds.y1 > header.bounds.y1 && n.bounds.x2 - n.bounds.x1 < screenW / 2;
-      await ui.scrollUntil(
-        { ...fileRow(RENAMED), where: inShelf },
-        {
-          direction: 'right',
-          maxSwipes: 5,
-          area: { x1: 0, y1: header.bounds.y2, x2: screenW, y2: header.bounds.y2 + 300 },
-        },
-      );
+      const inShelf = (n) => n.bounds.y2 > n.bounds.y1 && n.bounds.x2 - n.bounds.x1 < screenW / 2;
+      await ui.scrollUntil({ ...fileRow(RENAMED), where: inShelf }, { direction: 'up' });
     });
 
     await step(`f. My Files: create "${FOLDER}", open it, back to root`, async () => {

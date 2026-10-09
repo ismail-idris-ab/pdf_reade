@@ -157,18 +157,23 @@ export async function assertForeground(dumped) {
 
 /** Whether the soft keyboard is showing. */
 export async function keyboardShown() {
-  const out = await shell('dumpsys input_method | grep -E "mInputShown|InputViewShown"', {
-    allowFail: true,
-  });
-  return /mInputShown=true|isInputViewShown=true|mIsInputViewShown=true/.test(out);
+  // mIsInputViewShown stays true after the keyboard closes (seen on Samsung,
+  // Android 16), so only mInputShown and the window manager's mImeShowing count.
+  const out = await shell(
+    'dumpsys input_method | grep -E "mInputShown="; dumpsys window | grep -E "mImeShowing="',
+    { allowFail: true },
+  );
+  return /mInputShown=true|mImeShowing=true/.test(out);
 }
 
 /** Hides the keyboard (BACK only while it is showing, so nothing else is dismissed). */
 export async function hideKeyboard() {
+  // ESCAPE (111) closes the IME without acting as BACK, so a stale "shown"
+  // reading can never send the app's screen a back press and leave the app.
   if (!(await keyboardShown())) return;
   await assertForeground();
-  await adb(['shell', 'input', 'keyevent', '4']);
-  await sleep(400);
+  await adb(['shell', 'input', 'keyevent', '111']);
+  for (let i = 0; i < 10 && (await keyboardShown()); i++) await sleep(200);
 }
 
 export { describeQuery, escapeInputText, findCrashLines, findNodes };
