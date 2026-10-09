@@ -15,6 +15,12 @@ export const DEFAULT_PICK_MIME_TYPES: readonly string[] = DEFAULT_SCAN_EXTS.map(
 export type PickDocumentsOptions = {
   mimeTypes?: readonly string[];
   multiple?: boolean;
+  /**
+   * Take persistable grants (native default: true). Pass false when the
+   * documents are only read now (imports copy them): no grant is taken and
+   * every result has `persisted: false`.
+   */
+  persist?: boolean;
 };
 
 /**
@@ -24,9 +30,14 @@ export type PickDocumentsOptions = {
  * AppError; a newer call rejects a still-pending one with CANCELLED.
  */
 export async function pickDocuments(options: PickDocumentsOptions = {}): Promise<PickedDocument[]> {
-  const { mimeTypes = DEFAULT_PICK_MIME_TYPES, multiple = true } = options;
+  const { mimeTypes = DEFAULT_PICK_MIME_TYPES, multiple = true, persist } = options;
   try {
-    return await FileIndexModule.pickDocuments({ mimeTypes: [...mimeTypes], multiple });
+    return await FileIndexModule.pickDocuments({
+      mimeTypes: [...mimeTypes],
+      multiple,
+      // Omitted unless set, so the native default applies.
+      ...(persist === undefined ? {} : { persist }),
+    });
   } catch (error) {
     throw toAppError(error);
   }

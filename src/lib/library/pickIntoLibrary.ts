@@ -28,7 +28,8 @@ export async function pickIntoLibrary(
     picked.filter((document) => repos.files.isGrantInUse(document.uri)).map((d) => d.uri),
   );
   try {
-    return addPickedDocuments(repos, picked, { now: now(), fallbackName });
+    // Awaited here so a failure is caught below (grants released).
+    return await addPickedDocuments(repos, picked, { now: now(), fallbackName });
   } catch (error) {
     for (const document of picked) {
       if (!document.persisted || alreadyKept.has(document.uri)) continue;

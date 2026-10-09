@@ -9,6 +9,9 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 ## Notes for reviewers
 - Hausa `errors.UNSUPPORTED.title` ("Ba a goyan bayan irin wannan fayil"): code review suggested the usual form is "goyon baya"; please confirm.
 - Units: French uses o/Ko/Mo/Go; Hausa drafts keep B/KB/MB/GB. Please confirm what Hausa readers expect.
+- T1.4 `folders.deleteTitleWithItems_*` and `folders.importFailed_*` (`_one` / `_many` / `_other`) are i18next plural forms chosen by `count` (items in the folder; files that failed to import). CLDR: English and Hausa use one/other; French also uses "many" for very large round counts. Every catalogue has all three so the keys match; please check each form, the Hausa singulars in particular.
+- T1.4 `folders.imported` still avoids plural forms ("({{count}})"); please suggest wording that reads naturally for a count of 1.
+- T1.4 `names.invalidChars` lists the forbidden characters literally (\ / : * ? " < > |); keep them unchanged.
 
 ## Pending keys
 
@@ -101,3 +104,75 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `library.empty.noFilesHereMessage` | Try another file type or source. | Gwada wani nau’in fayil ko wata majiya. | Essayez un autre type de fichier ou une autre source. | T1.3 |
 | `library.empty.noMatchesTitle` | No matching files | Babu fayil da ya dace | Aucun fichier correspondant | T1.3 |
 | `library.empty.noMatchesMessage` | Try a different name, or check the file type and source. | Gwada wani suna, ko duba nau’in fayil da majiya. | Essayez un autre nom, ou vérifiez le type de fichier et la source. | T1.3 |
+| `fileActions.moreFor` | More actions for {{name}} | Ƙarin ayyuka don {{name}} | Plus d’actions pour {{name}} | T1.4 |
+| `fileActions.longPressHint` | Long-press for more actions | Danna ka riƙe don ƙarin ayyuka | Appui long pour plus d’actions | T1.4 |
+| `fileActions.favorite` | Add to favorites | Ƙara cikin waɗanda aka fi so | Ajouter aux favoris | T1.4 |
+| `fileActions.unfavorite` | Remove from favorites | Cire daga waɗanda aka fi so | Retirer des favoris | T1.4 |
+| `fileActions.rename` | Rename | Sake suna | Renommer | T1.4 |
+| `fileActions.move` | Move | Matsar | Déplacer | T1.4 |
+| `fileActions.copyToMyFiles` | Copy to My Files | Kwafa zuwa Fayilolina | Copier dans Mes fichiers | T1.4 |
+| `fileActions.duplicate` | Duplicate | Yi kwafi | Dupliquer | T1.4 |
+| `fileActions.details` | Details | Bayani | Détails | T1.4 |
+| `fileActions.share` | Share | Raba | Partager | T1.4 |
+| `fileActions.print` | Print | Buga | Imprimer | T1.4 |
+| `fileActions.delete` | Delete | Goge | Supprimer | T1.4 |
+| `fileActions.save` | Save | Ajiye | Enregistrer | T1.4 |
+| `fileActions.nameLabel` | Name | Suna | Nom | T1.4 |
+| `fileActions.savedAs` | Will be saved as “{{name}}” | Za a ajiye shi a matsayin “{{name}}” | Sera enregistré sous « {{name}} » | T1.4 |
+| `fileActions.renameUnsupported` | This app can’t rename this file. Copy it to My Files to rename it. | Wannan manhaja ba za ta iya sake sunan wannan fayil ba. Ka kwafa shi zuwa Fayilolina don sake masa suna. | Cette application ne peut pas renommer ce fichier. Copiez-le dans Mes fichiers pour le renommer. | T1.4 |
+| `fileActions.duplicateLeft` | The file was moved, but the original couldn’t be removed: a second copy is still in its old folder. | An matsar da fayil ɗin, amma ba a iya cire na asali ba: akwai kwafi na biyu a tsohon babban fayil ɗinsa. | Le fichier a été déplacé, mais l’original n’a pas pu être supprimé : une seconde copie reste dans son ancien dossier. | T1.4 |
+| `fileActions.deleteTitle` | Delete “{{name}}”? | A goge “{{name}}”? | Supprimer « {{name}} » ? | T1.4 |
+| `fileActions.deleteMessage` | This can’t be undone. | Ba za a iya dawo da wannan ba. | Cette action est irréversible. | T1.4 |
+| `fileActions.favorited` | Added to favorites | An ƙara cikin waɗanda aka fi so | Ajouté aux favoris | T1.4 |
+| `fileActions.unfavorited` | Removed from favorites | An cire daga waɗanda aka fi so | Retiré des favoris | T1.4 |
+| `fileActions.renamed` | Renamed | An sake suna | Renommé | T1.4 |
+| `fileActions.moved` | Moved to {{folder}} | An matsar zuwa {{folder}} | Déplacé dans {{folder}} | T1.4 |
+| `fileActions.copied` | Copied to {{folder}} | An kwafa zuwa {{folder}} | Copié dans {{folder}} | T1.4 |
+| `fileActions.duplicated` | Copy created | An yi kwafi | Copie créée | T1.4 |
+| `fileActions.deleted` | Deleted | An goge | Supprimé | T1.4 |
+| `fileActions.removeFromLibrary` | Remove from library | Cire daga ɗakin karatu | Retirer de la bibliothèque | T1.4 |
+| `fileActions.removedFromLibrary` | Removed from library | An cire daga ɗakin karatu | Retiré de la bibliothèque | T1.4 |
+| `fileActions.allowAccessToChange` | Allow all-files access so the app can change files on your phone. | Ba da izinin shiga duk fayiloli domin manhajar ta iya canza fayiloli a wayarka. | Autorisez l’accès à tous les fichiers pour que l’application puisse modifier les fichiers de votre téléphone. | T1.4 |
+| `fileActions.moveTitle` | Move to | Matsar zuwa | Déplacer vers | T1.4 |
+| `fileActions.copyTitle` | Copy to My Files | Kwafa zuwa Fayilolina | Copier dans Mes fichiers | T1.4 |
+| `fileActions.moveHere` | Move here | Matsar nan | Déplacer ici | T1.4 |
+| `fileActions.copyHere` | Copy here | Kwafa nan | Copier ici | T1.4 |
+| `names.empty` | Enter a name. | Shigar da suna. | Saisissez un nom. | T1.4 |
+| `names.invalidChars` | Names can’t contain any of these: \ / : * ? " < > \| | Suna ba zai iya ƙunsar ɗaya daga cikin waɗannan ba: \ / : * ? " < > \| | Un nom ne peut contenir aucun de ces caractères : \ / : * ? " < > \| | T1.4 |
+| `names.invalid` | This name can’t be used. Choose another. | Ba za a iya amfani da wannan suna ba. Zaɓi wani. | Ce nom ne peut pas être utilisé. Choisissez-en un autre. | T1.4 |
+| `names.leadingDot` | Names can’t start with a dot. | Suna ba zai iya farawa da digo ba. | Un nom ne peut pas commencer par un point. | T1.4 |
+| `names.tooLong` | This name is too long. | Wannan suna ya yi tsawo sosai. | Ce nom est trop long. | T1.4 |
+| `names.exists` | Something with this name is already here. | Akwai wani abu mai wannan suna a nan. | Un élément porte déjà ce nom ici. | T1.4 |
+| `folders.root` | My Files | Fayilolina | Mes fichiers | T1.4 |
+| `folders.pathLabel` | Folder path | Hanyar babban fayil | Chemin du dossier | T1.4 |
+| `folders.folderLabel` | {{name}}, folder | {{name}}, babban fayil | {{name}}, dossier | T1.4 |
+| `folders.newFolder` | New folder | Sabon babban fayil | Nouveau dossier | T1.4 |
+| `folders.create` | Create | Ƙirƙira | Créer | T1.4 |
+| `folders.import` | Import | Shigo da | Importer | T1.4 |
+| `folders.up` | Up one level | Koma mataki ɗaya baya | Remonter d’un niveau | T1.4 |
+| `folders.uninstallNote` | Files in My Files are removed if you uninstall the app. | Za a cire fayilolin da ke cikin Fayilolina idan ka cire manhajar. | Les fichiers de Mes fichiers sont supprimés si vous désinstallez l’application. | T1.4 |
+| `folders.emptyTitle` | This folder is empty | Wannan babban fayil babu komai | Ce dossier est vide | T1.4 |
+| `folders.emptyMessage` | Import files or create a folder. | Shigo da fayiloli ko ƙirƙiri babban fayil. | Importez des fichiers ou créez un dossier. | T1.4 |
+| `folders.loadErrorTitle` | This folder couldn’t be opened | Ba a iya buɗe wannan babban fayil ba | Impossible d’ouvrir ce dossier | T1.4 |
+| `folders.deleteTitle` | Delete “{{name}}”? | A goge “{{name}}”? | Supprimer « {{name}} » ? | T1.4 |
+| `folders.deleteTitleWithItems_one` | Delete “{{name}}” and the item inside? | A goge “{{name}}” da abin da ke ciki? | Supprimer « {{name}} » et l’élément qu’il contient ? | T1.4 |
+| `folders.deleteTitleWithItems_many` | Delete “{{name}}” and the {{count}} items inside? | A goge “{{name}}” da abubuwa {{count}} da ke ciki? | Supprimer « {{name}} » et les {{count}} d’éléments qu’il contient ? | T1.4 |
+| `folders.deleteTitleWithItems_other` | Delete “{{name}}” and the {{count}} items inside? | A goge “{{name}}” da abubuwa {{count}} da ke ciki? | Supprimer « {{name}} » et les {{count}} éléments qu’il contient ? | T1.4 |
+| `folders.created` | Folder created | An ƙirƙiri babban fayil | Dossier créé | T1.4 |
+| `folders.renamed` | Folder renamed | An sake sunan babban fayil | Dossier renommé | T1.4 |
+| `folders.deleted` | Folder deleted | An goge babban fayil | Dossier supprimé | T1.4 |
+| `folders.imported` | Imported to My Files ({{count}}) | An shigo da su cikin Fayilolina ({{count}}) | Importé dans Mes fichiers ({{count}}) | T1.4 |
+| `folders.importFailed_one` | {{count}} file of {{total}} couldn’t be imported. | Ba a iya shigo da fayil {{count}} daga cikin {{total}} ba. | {{count}} fichier sur {{total}} n’a pas pu être importé. | T1.4 |
+| `folders.importFailed_many` | {{count}} of {{total}} files couldn’t be imported. | Ba a iya shigo da fayiloli {{count}} daga cikin {{total}} ba. | {{count}} de fichiers sur {{total}} n’ont pas pu être importés. | T1.4 |
+| `folders.importFailed_other` | {{count}} of {{total}} files couldn’t be imported. | Ba a iya shigo da fayiloli {{count}} daga cikin {{total}} ba. | {{count}} fichiers sur {{total}} n’ont pas pu être importés. | T1.4 |
+| `details.title` | Details | Bayani | Détails | T1.4 |
+| `details.type` | Type | Nau’i | Type | T1.4 |
+| `details.size` | Size | Girma | Taille | T1.4 |
+| `details.modified` | Modified | An gyara | Modifié | T1.4 |
+| `details.location` | Location | Wuri | Emplacement | T1.4 |
+| `details.pages` | Pages | Shafuka | Pages | T1.4 |
+| `details.typeValue` | {{ext}} file | Fayil ɗin {{ext}} | Fichier {{ext}} | T1.4 |
+| `details.unknownType` | Unknown | Ba a sani ba | Inconnu | T1.4 |
+| `details.pickedFile` | Picked file | Fayil da aka zaɓa | Fichier choisi | T1.4 |
+| `details.phoneStorage` | Phone storage | Ma’ajiyar waya | Stockage du téléphone | T1.4 |
+| `details.sdCard` | SD card | Katin SD | Carte SD | T1.4 |

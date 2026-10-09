@@ -53,10 +53,10 @@ object FileNames {
     }
   }
 
-  private fun utf8Length(value: String): Int = value.toByteArray(Charsets.UTF_8).size
+  internal fun utf8Length(value: String): Int = value.toByteArray(Charsets.UTF_8).size
 
   /** Longest prefix of [value] whose UTF-8 encoding fits [maxBytes], never splitting a code point. */
-  private fun truncateUtf8(value: String, maxBytes: Int): String {
+  internal fun truncateUtf8(value: String, maxBytes: Int): String {
     var bytes = 0
     var index = 0
     while (index < value.length) {

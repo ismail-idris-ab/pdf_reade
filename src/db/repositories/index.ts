@@ -22,6 +22,7 @@ export type Repositories = ReturnType<typeof createRepositories>;
 export { toFtsQuery } from './files';
 export { compareNames } from './files';
 export type {
+  FileLocation,
   GrantEntry,
   LibraryFile,
   LibraryQuery,

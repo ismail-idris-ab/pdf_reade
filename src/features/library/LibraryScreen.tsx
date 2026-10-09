@@ -1,8 +1,8 @@
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { memo, useCallback, useMemo, useState } from 'react';
-import { Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { BackHandler, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccessBanner } from '@/components/AccessBanner';
@@ -10,6 +10,7 @@ import {
   CloseIcon,
   DevIcon,
   FileIcon,
+  FolderIcon,
   GridIcon,
   ListIcon,
   SearchIcon,
@@ -19,12 +20,19 @@ import { EmptyState, IconButton } from '@/components/ui';
 import type { LibraryFile } from '@/db/repositories';
 import { useFormatDate, useFormatFileSize, useTranslation } from '@/i18n';
 import { toRecoveryLabel, toUserMessage } from '@/lib/errors';
+import type { FolderEntry } from '@/lib/files';
 import { bumpLibraryVersion } from '@/lib/library/version';
 import { useTheme } from '@/theme';
 
+import { parentDir } from '../files/actions';
+import { FileActionsHost } from '../files/FileActionsHost';
+import { MyFilesHeader } from '../files/components/MyFilesHeader';
+import { useMyFilesStore } from '../files/store';
+import { useMyFilesFolder, useMyFilesRoot, type MyFilesFolder } from '../files/useMyFilesFolder';
 import { LibraryTabs, SourceChips } from './components/Filters';
 import { FileListRow, FileTile, type FormatDetails } from './components/FileItems';
 import { FileShelf } from './components/FileShelf';
+import { FolderListRow, FolderTile } from './components/FolderItems';
 import { SortSheet } from './components/SortSheet';
 import { useLibraryPrefsStore } from './store';
 import { showsShelves } from './filters';
@@ -38,7 +46,13 @@ const MIN_COLUMN_WIDTH = 112;
 // Horizontal padding inside a grid cell (FileTile's p-2 on both sides), dp.
 const CELL_INSET = 16;
 
-const keyExtractor = (file: LibraryFile) => String(file.id);
+/** A list entry: a library file, or a folder while browsing My Files. */
+type LibraryEntry = LibraryFile | FolderEntry;
+
+const isFolder = (entry: LibraryEntry): entry is FolderEntry => 'isDirectory' in entry;
+
+const keyExtractor = (entry: LibraryEntry) =>
+  isFolder(entry) ? `folder:${entry.path}` : String(entry.id);
 const GRID_CONTENT = { paddingHorizontal: GRID_PADDING };
 
 function useFormatDetails(): FormatDetails {
@@ -54,8 +68,11 @@ function useFormatDetails(): FormatDetails {
 
 /**
  * The library (home screen): every indexed and picked document, filtered by
- * type tab and source chip, searchable by name, as a list or a grid. Rows
- * are not pressable until the reader exists (T2.3).
+ * type tab and source chip, searchable by name, as a list or a grid. With
+ * the My Files chip (and no search) it browses the My Files folder tree:
+ * folders first, then files, with a breadcrumb, New folder and Import.
+ * Files open their actions sheet from ⋮ or a long-press; opening a file for
+ * reading arrives with the reader (T2.3).
  */
 export function LibraryScreen() {
   const insets = useSafeAreaInsets();
@@ -79,15 +96,50 @@ export function LibraryScreen() {
   const [sortOpen, setSortOpen] = useState(false);
   const formatDetails = useFormatDetails();
 
+  // My Files browsing (a search searches the whole of My Files instead).
+  const browsing = chip === 'myfiles' && query === '';
+  const root = useMyFilesRoot();
+  const browsedDir = useMyFilesStore((state) => state.dir);
+  const setBrowsedDir = useMyFilesStore((state) => state.setDir);
+  const currentDir = browsedDir ?? root;
+  const folder = useMyFilesFolder(
+    currentDir,
+    { tab, sort, sortDir, locale: i18n.language },
+    browsing,
+  );
+  const atRoot = currentDir === null || currentDir === root;
+
+  // Hardware back goes up one folder while browsing below the root.
+  useEffect(() => {
+    if (!browsing || atRoot || currentDir === null) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setBrowsedDir(parentDir(currentDir));
+      return true;
+    });
+    return () => subscription.remove();
+  }, [browsing, atRoot, currentDir, setBrowsedDir]);
+
+  const openFolder = useCallback(
+    (entry: FolderEntry) => setBrowsedDir(entry.path),
+    [setBrowsedDir],
+  );
+
   const columns = Math.min(
     6,
     Math.max(2, Math.floor((width - GRID_PADDING * 2) / MIN_COLUMN_WIDTH)),
   );
   const tileWidth = Math.floor((width - GRID_PADDING * 2) / columns) - CELL_INSET;
 
-  const renderItem: ListRenderItem<LibraryFile> = useCallback(
-    ({ item }) =>
-      view === 'grid' ? (
+  const renderItem: ListRenderItem<LibraryEntry> = useCallback(
+    ({ item }) => {
+      if (isFolder(item)) {
+        return view === 'grid' ? (
+          <FolderTile folder={item} onOpen={openFolder} width={tileWidth} />
+        ) : (
+          <FolderListRow folder={item} onOpen={openFolder} />
+        );
+      }
+      return view === 'grid' ? (
         <FileTile
           testID={`library-cell-${item.id}`}
           file={item}
@@ -96,23 +148,42 @@ export function LibraryScreen() {
         />
       ) : (
         <FileListRow file={item} formatDetails={formatDetails} />
-      ),
-    [view, formatDetails, tileWidth],
+      );
+    },
+    [view, formatDetails, tileWidth, openFolder],
   );
-  const getItemType = useCallback(() => view, [view]);
+  const getItemType = useCallback(
+    (entry: LibraryEntry) => `${view}-${isFolder(entry) ? 'folder' : 'file'}`,
+    [view],
+  );
 
-  const recent = data.status === 'ready' ? data.recent : EMPTY;
-  const favorites = data.status === 'ready' ? data.favorites : EMPTY;
+  const folderEntries = useMemo<readonly LibraryEntry[]>(
+    () => (folder.status === 'ready' ? [...folder.folders, ...folder.files] : EMPTY),
+    [folder],
+  );
+  const items: readonly LibraryEntry[] = browsing
+    ? folderEntries
+    : data.status === 'ready'
+      ? data.items
+      : EMPTY;
+
+  const recent = data.status === 'ready' ? data.recent : EMPTY_FILES;
+  const favorites = data.status === 'ready' ? data.favorites : EMPTY_FILES;
   const header = useMemo(
-    () => (
-      <ListHeader
-        shelves={shelves}
-        recent={recent}
-        favorites={favorites}
-        formatDetails={formatDetails}
-      />
-    ),
-    [shelves, recent, favorites, formatDetails],
+    () =>
+      browsing ? (
+        <View className="pb-2">
+          <MyFilesHeader root={root} dir={currentDir} onNavigate={setBrowsedDir} />
+        </View>
+      ) : (
+        <ListHeader
+          shelves={shelves}
+          recent={recent}
+          favorites={favorites}
+          formatDetails={formatDetails}
+        />
+      ),
+    [browsing, root, currentDir, setBrowsedDir, shelves, recent, favorites, formatDetails],
   );
 
   return (
@@ -125,23 +196,31 @@ export function LibraryScreen() {
         // the list so no recycled cell of the other layout is reused.
         key={view === 'grid' ? `grid-${columns}` : 'list'}
         testID="library-list"
-        data={data.status === 'ready' ? data.items : EMPTY}
+        data={items}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
         getItemType={getItemType}
         numColumns={view === 'grid' ? columns : 1}
         contentContainerStyle={view === 'grid' ? GRID_CONTENT : undefined}
         ListHeaderComponent={header}
-        ListEmptyComponent={<LibraryEmpty data={data} searching={query !== ''} />}
+        ListEmptyComponent={
+          browsing ? (
+            <FolderEmpty folder={folder} />
+          ) : (
+            <LibraryEmpty data={data} searching={query !== ''} />
+          )
+        }
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       />
       <SortSheet visible={sortOpen} onClose={() => setSortOpen(false)} />
+      <FileActionsHost />
     </View>
   );
 }
 
-const EMPTY: readonly LibraryFile[] = [];
+const EMPTY: readonly LibraryEntry[] = [];
+const EMPTY_FILES: readonly LibraryFile[] = [];
 
 type TopBarProps = {
   search: string;
@@ -258,6 +337,33 @@ const ListHeader = memo(function ListHeader({
     </View>
   );
 });
+
+function FolderEmpty({ folder }: { folder: MyFilesFolder }) {
+  const { t } = useTranslation();
+  const { palette } = useTheme();
+  const icon = <FolderIcon color={palette.muted} size={48} />;
+  if (folder.status === 'loading') return null;
+  if (folder.status === 'error') {
+    const message = toUserMessage(folder.error.code);
+    return (
+      <EmptyState
+        testID="myfiles-error"
+        icon={icon}
+        title={t('folders.loadErrorTitle')}
+        message={message.message}
+        action={{ label: toRecoveryLabel('retry'), onPress: bumpLibraryVersion }}
+      />
+    );
+  }
+  return (
+    <EmptyState
+      testID="myfiles-empty"
+      icon={icon}
+      title={t('folders.emptyTitle')}
+      message={t('folders.emptyMessage')}
+    />
+  );
+}
 
 function LibraryEmpty({ data, searching }: { data: LibraryData; searching: boolean }) {
   const { t } = useTranslation();

@@ -12,6 +12,7 @@ import type { NewFile } from '@/db/types';
 import { AppError } from '@/lib/errors';
 import {
   addPickedDocuments,
+  exclusive,
   indexLibrary,
   isContentUri,
   isIndexing,
@@ -130,6 +131,36 @@ describe('indexLibrary', () => {
     expect(repos.files.getByPath(PICKED_URI)).toBeDefined();
   });
 
+  it('never adds, refreshes or prunes My Files rows (the scan does not own them)', async () => {
+    const root = '/data/user/0/com.ismailidris.pdfreader/files/MyFiles';
+    // Under the native root, and under the classifier's other My Files form.
+    const mine = repos.files.upsert({ ...fileRow(`${root}/a.pdf`, 7), source: 'myfiles' });
+    const legacy = repos.files.upsert({
+      ...fileRow('/data/data/com.ismailidris.pdfreader/files/MyFiles/Sub/b.pdf', 8),
+      source: 'myfiles',
+    });
+    repos.files.upsert(fileRow(`${DOWNLOAD}/gone.pdf`));
+
+    const run = indexLibrary(repos);
+    await flush();
+    expect(native.startScan.mock.calls[0]?.[0].knownMtimes).toEqual({
+      [`${DOWNLOAD}/gone.pdf`]: 1_000,
+    });
+    native.emitBatch({
+      scanId: 'scan-1',
+      files: [{ path: `${root}/new.pdf`, name: 'new.pdf', ext: 'pdf', size: 1, mtime: 1 }],
+    });
+    native.emitComplete(
+      complete({ deleted: [`${root}/a.pdf`, legacy.path, `${DOWNLOAD}/gone.pdf`] }),
+    );
+
+    await expect(run).resolves.toMatchObject({ status: 'completed', upserted: 0, removed: 1 });
+    expect(repos.files.getById(mine.id)).toMatchObject({ mtime: 7, source: 'myfiles' });
+    expect(repos.files.getById(legacy.id)).toBeDefined();
+    expect(repos.files.getByPath(`${root}/new.pdf`)).toBeUndefined();
+    expect(repos.files.getByPath(`${DOWNLOAD}/gone.pdf`)).toBeUndefined();
+  });
+
   it('does not overlap: a second call joins the running scan', async () => {
     const first = indexLibrary(repos);
     const second = indexLibrary(repos);
@@ -235,8 +266,12 @@ const picked = (overrides: Partial<PickedDocument> = {}): PickedDocument => ({
 const pickOptions = { now: 9_999, fallbackName: 'Untitled document', grantLimit: 500 };
 
 describe('addPickedDocuments', () => {
-  it('stores the document keyed by its URI with source device', () => {
-    const { rows, notPersisted, evicted } = addPickedDocuments(repos, [picked()], pickOptions);
+  it('stores the document keyed by its URI with source device', async () => {
+    const { rows, notPersisted, evicted } = await addPickedDocuments(
+      repos,
+      [picked()],
+      pickOptions,
+    );
     expect(notPersisted).toBe(0);
     expect(evicted).toBe(0);
     expect(rows[0]).toMatchObject({
@@ -251,8 +286,8 @@ describe('addPickedDocuments', () => {
     });
   });
 
-  it('falls back to the given name, MIME-derived ext and default size/mtime', () => {
-    const { rows } = addPickedDocuments(
+  it('falls back to the given name, MIME-derived ext and default size/mtime', async () => {
+    const { rows } = await addPickedDocuments(
       repos,
       [
         picked({
@@ -272,8 +307,8 @@ describe('addPickedDocuments', () => {
     });
   });
 
-  it('uses the MIME type when the name has no known extension', () => {
-    const { rows } = addPickedDocuments(
+  it('uses the MIME type when the name has no known extension', async () => {
+    const { rows } = await addPickedDocuments(
       repos,
       [
         picked({ uri: 'content://p/1', name: 'scan', mime: 'text/csv' }),
@@ -287,8 +322,8 @@ describe('addPickedDocuments', () => {
     expect(rows[2]).toMatchObject({ name: 'Untitled document', ext: '', mime: null });
   });
 
-  it('derives the MIME type from the name when the provider gives none', () => {
-    const { rows } = addPickedDocuments(
+  it('derives the MIME type from the name when the provider gives none', async () => {
+    const { rows } = await addPickedDocuments(
       repos,
       [picked({ name: 'sheet.xlsx', mime: null })],
       pickOptions,
@@ -299,16 +334,16 @@ describe('addPickedDocuments', () => {
     });
   });
 
-  it('refreshes instead of duplicating when the same URI is picked again', () => {
-    addPickedDocuments(repos, [picked()], pickOptions);
-    addPickedDocuments(repos, [picked({ size: 4096 })], pickOptions);
+  it('refreshes instead of duplicating when the same URI is picked again', async () => {
+    await addPickedDocuments(repos, [picked()], pickOptions);
+    await addPickedDocuments(repos, [picked({ size: 4096 })], pickOptions);
     const rows = repos.files.list();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.size).toBe(4096);
   });
 
-  it('leaves out documents whose grant was not persisted', () => {
-    const result = addPickedDocuments(
+  it('leaves out documents whose grant was not persisted', async () => {
+    const result = await addPickedDocuments(
       repos,
       [picked({ uri: 'content://p/kept' }), picked({ uri: 'content://p/temp', persisted: false })],
       pickOptions,
@@ -318,9 +353,9 @@ describe('addPickedDocuments', () => {
     expect(repos.files.getByPath('content://p/temp')).toBeUndefined();
   });
 
-  it('a non-persisted pick is never stored, so the next prune has nothing to drop', () => {
+  it('a non-persisted pick is never stored, so the next prune has nothing to drop', async () => {
     native.listPersistedUris.mockImplementation(() => ['content://p/kept']);
-    addPickedDocuments(
+    await addPickedDocuments(
       repos,
       [picked({ uri: 'content://p/kept' }), picked({ uri: 'content://p/temp', persisted: false })],
       pickOptions,
@@ -347,10 +382,10 @@ describe('addPickedDocuments grant cap', () => {
     if (opened) repos.files.markOpened(opened.id, 1);
   }
 
-  it('evicts nothing while under the limit', () => {
+  it('evicts nothing while under the limit', async () => {
     seedOldPicks();
     native.listPersistedUris.mockImplementation(() => OLD);
-    const result = addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
+    const result = await addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
       ...pickOptions,
       grantLimit: 6,
     });
@@ -358,11 +393,11 @@ describe('addPickedDocuments grant cap', () => {
     expect(native.releasePersistedUri).not.toHaveBeenCalled();
   });
 
-  it('releases and removes only as many least-recently-used picks as needed', () => {
+  it('releases and removes only as many least-recently-used picks as needed', async () => {
     seedOldPicks();
     // The picker may already list the new grant; it is counted once.
     native.listPersistedUris.mockImplementation(() => [...OLD, 'content://p/new1']);
-    const result = addPickedDocuments(
+    const result = await addPickedDocuments(
       repos,
       [picked({ uri: 'content://p/new1' }), picked({ uri: 'content://p/new2' })],
       { ...pickOptions, grantLimit: 5 },
@@ -377,10 +412,10 @@ describe('addPickedDocuments grant cap', () => {
     expect(repos.files.getByPath('content://p/new2')).toBeDefined();
   });
 
-  it('releases orphan grants (no library row) before evicting rows', () => {
+  it('releases orphan grants (no library row) before evicting rows', async () => {
     seedOldPicks();
     native.listPersistedUris.mockImplementation(() => [...OLD, 'content://p/orphan']);
-    const result = addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
+    const result = await addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
       ...pickOptions,
       grantLimit: 6,
     });
@@ -462,9 +497,9 @@ describe('duplicate picked documents', () => {
     expect(repos.files.getByPath(`${DOWNLOAD}/cv.pdf`)?.uri).toBe('content://p/first');
   });
 
-  it('picking a file the scan already indexed merges it at once', () => {
+  it('picking a file the scan already indexed merges it in the same task', async () => {
     const scannedRow = repos.files.upsert(fileRow(`${DOWNLOAD}/cv.pdf`));
-    const result = addPickedDocuments(
+    const result = await addPickedDocuments(
       repos,
       [picked({ uri: PICKED_URI, name: 'cv.pdf', size: 100, mtime: 1_000 })],
       pickOptions,
@@ -475,20 +510,21 @@ describe('duplicate picked documents', () => {
     expect(native.releasePersistedUri).not.toHaveBeenCalled();
   });
 
-  it('a pick without a provider mtime merges on name and size', () => {
+  it('a pick without a provider mtime merges on name and size', async () => {
     const scannedRow = repos.files.upsert(fileRow(`${DOWNLOAD}/cv.pdf`));
-    addPickedDocuments(
+    await addPickedDocuments(
       repos,
       [picked({ uri: PICKED_URI, name: 'cv.pdf', size: 100, mtime: null })],
       pickOptions,
     );
+    await flush();
     expect(repos.files.getByPath(PICKED_URI)).toBeUndefined();
     expect(repos.files.getById(scannedRow.id)?.uri).toBe(PICKED_URI);
   });
 
-  it('a pick with a different provider mtime is kept separate', () => {
+  it('a pick with a different provider mtime is kept separate', async () => {
     repos.files.upsert(fileRow(`${DOWNLOAD}/cv.pdf`));
-    addPickedDocuments(
+    await addPickedDocuments(
       repos,
       [picked({ uri: PICKED_URI, name: 'cv.pdf', size: 100, mtime: 99_000 })],
       pickOptions,
@@ -533,10 +569,10 @@ describe('duplicate picked documents', () => {
 });
 
 describe('fallback uris and the grant cap / prune', () => {
-  it('counts a fallback grant as in use, not as an orphan', () => {
+  it('counts a fallback grant as in use, not as an orphan', async () => {
     repos.files.upsert({ ...fileRow(`${DOWNLOAD}/a.pdf`), uri: 'content://p/fallback' });
     native.listPersistedUris.mockImplementation(() => ['content://p/fallback']);
-    const result = addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
+    const result = await addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
       ...pickOptions,
       grantLimit: 2,
     });
@@ -544,13 +580,13 @@ describe('fallback uris and the grant cap / prune', () => {
     expect(native.releasePersistedUri).not.toHaveBeenCalled();
   });
 
-  it('evicting a fallback grant only clears the uri; the row stays', () => {
+  it('evicting a fallback grant only clears the uri; the row stays', async () => {
     const row = repos.files.upsert({
       ...fileRow(`${DOWNLOAD}/a.pdf`, 1),
       uri: 'content://p/fallback',
     });
     native.listPersistedUris.mockImplementation(() => ['content://p/fallback']);
-    const result = addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
+    const result = await addPickedDocuments(repos, [picked({ uri: 'content://p/new' })], {
       ...pickOptions,
       grantLimit: 1,
     });
@@ -599,9 +635,9 @@ describe('library version', () => {
     expect(version()).toBe(start + 1);
   });
 
-  it('is bumped by picks and by prunes that removed rows', () => {
+  it('is bumped by picks and by prunes that removed rows', async () => {
     const start = version();
-    addPickedDocuments(repos, [picked()], pickOptions);
+    await addPickedDocuments(repos, [picked()], pickOptions);
     expect(version()).toBe(start + 1);
     native.listPersistedUris.mockImplementation(() => [PICKED_URI]);
     expect(prunePickedDocuments(repos)).toBe(0);
@@ -609,5 +645,40 @@ describe('library version', () => {
     native.listPersistedUris.mockImplementation(() => []);
     expect(prunePickedDocuments(repos)).toBe(1);
     expect(version()).toBe(start + 2);
+  });
+});
+
+describe('addPickedDocuments queueing', () => {
+  it('eviction, upsert and merge wait for a running library task', async () => {
+    let release: () => void = () => undefined;
+    const running = exclusive(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const listPersisted = native.listPersistedUris;
+    const adding = addPickedDocuments(repos, [picked()], pickOptions);
+    await flush();
+    // Nothing ran yet: not even the grant-limit check.
+    expect(listPersisted).not.toHaveBeenCalled();
+    expect(repos.files.countAll()).toBe(0);
+
+    release();
+    await running;
+    await expect(adding).resolves.toMatchObject({ rows: [expect.anything()] });
+    expect(repos.files.countAll()).toBe(1);
+  });
+
+  it('a later library task waits for the pick to finish', async () => {
+    const order: string[] = [];
+    const adding = addPickedDocuments(repos, [picked()], pickOptions).then(() =>
+      order.push('pick'),
+    );
+    const after = exclusive(() => {
+      order.push(`after:${repos.files.countAll()}`);
+    });
+    await Promise.all([adding, after]);
+    expect(order).toEqual(['pick', 'after:1']);
   });
 });

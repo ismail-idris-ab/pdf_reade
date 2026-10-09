@@ -8,18 +8,22 @@ import {
   DEFAULT_SCAN_EXTS,
   extForMime,
   hasAllFilesAccess,
+  isInMyFiles,
   listPersistedUris,
   releasePersistedUri,
   mimeForExt,
   scanDocuments,
   toNewFile,
+  tryGetMyFilesRoot,
   type PickedDocument,
   type ScanSummary,
 } from '@/lib/files';
 
+import { exclusive } from './exclusive';
 import { bumpLibraryVersion } from './version';
 
 export { bumpLibraryVersion, useLibraryVersion, useLibraryVersionStore } from './version';
+export { exclusive } from './exclusive';
 
 // Library rule: every content:// URI stored in the files table holds a
 // persisted read grant taken by the picker. That is either a picked row's
@@ -37,10 +41,17 @@ export function isContentUri(path: string): boolean {
   return /^content:\/\//i.test(path);
 }
 
-// Rows the storage scan owns: absolute filesystem paths. content:// rows come
-// from the picker and are never touched by a scan.
+// Absolute filesystem paths (content:// rows come from the picker).
 function isFilesystemPath(path: string): boolean {
   return path.startsWith('/');
+}
+
+// Rows the storage scan owns: filesystem paths outside My Files. content://
+// rows come from the picker, and My Files is app-private storage the scan
+// does not walk (reconcileMyFiles keeps those rows in step with disk), so a
+// scan never adds, refreshes or prunes either.
+function scanOwns(path: string, myFilesRoot: string | null): boolean {
+  return isFilesystemPath(path) && !isInMyFiles(path, myFilesRoot);
 }
 
 /**
@@ -76,7 +87,7 @@ export function isIndexing(): boolean {
 /**
  * Scans shared storage and brings the `files` table in line with it: new and
  * changed documents are upserted, rows for deleted files are removed. Only
- * filesystem-path rows take part in that; the one exception for picked
+ * filesystem-path rows outside My Files take part in that; the one exception for picked
  * (content://) rows is that, after a completed scan, a picked row whose file
  * the scan also found is merged into that file's row (mergePickedDuplicates).
  * Mounted library screens are told about changes (bumpLibraryVersion) during
@@ -111,9 +122,11 @@ async function runIndex(
 ): Promise<IndexLibraryResult> {
   if (!hasAllFilesAccess()) return { status: 'permissionDenied' };
 
+  const myFilesRoot = tryGetMyFilesRoot();
+  const owned = (path: string) => scanOwns(path, myFilesRoot);
   const knownMtimes: Record<string, number> = {};
   for (const entry of repos.files.listIndexEntries()) {
-    if (isFilesystemPath(entry.path)) knownMtimes[entry.path] = entry.mtime;
+    if (owned(entry.path)) knownMtimes[entry.path] = entry.mtime;
   }
 
   let upserted = 0;
@@ -126,9 +139,7 @@ async function runIndex(
     signal,
     onBatch: (files) => {
       // One transaction per batch: a failing row rolls back the whole batch.
-      const rows = files
-        .filter((file) => isFilesystemPath(file.path))
-        .map((file) => toNewFile(file));
+      const rows = files.filter((file) => owned(file.path)).map((file) => toNewFile(file));
       repos.files.upsertMany(rows);
       upserted += rows.length;
       if (rows.length === 0) return;
@@ -154,9 +165,11 @@ async function runIndex(
     if (summary.cancelled) return { status: 'cancelled', upserted };
 
     // One transaction for all deletions.
-    const removed = repos.files.removeByPaths(summary.deleted.filter(isFilesystemPath));
+    const removed = repos.files.removeByPaths(summary.deleted.filter(owned));
     if (removed > 0) dirty = true;
-    const merged = mergePickedDuplicates(repos);
+    // Queued with the file actions: a merge deletes picked rows, which must
+    // not happen in the middle of an action on one of them.
+    const merged = await exclusive(() => mergePickedDuplicates(repos));
     if (merged > 0) dirty = true;
     return { status: 'completed', upserted, removed, scanned: summary.scanned, merged };
   } finally {
@@ -181,7 +194,11 @@ export function mergePickedDuplicates(
 ): number {
   let result: MergeContentResult;
   try {
-    result = repos.files.mergeContentDuplicates(options);
+    result = repos.files.mergeContentDuplicates({
+      ...options,
+      // My Files copies are separate files, never the picked document.
+      myFilesRoot: tryGetMyFilesRoot(),
+    });
   } catch (error) {
     throw toAppError(error);
   }
@@ -291,8 +308,27 @@ function enforceGrantLimit(repos: Repositories, newUris: readonly string[], limi
  * again refreshes it instead of duplicating it. Documents whose grant was not
  * persisted are left out (the library rule above). All rows are written in
  * one transaction. Older picks may be evicted to respect the grant cap.
+ *
+ * Eviction, the upsert and the merge run as one task on the shared library
+ * queue (exclusive), so none of them interleaves with a file action, a My
+ * Files reconcile or a scan's merge. Never call it from inside an
+ * exclusive() task: it would wait for itself. Rejects with an AppError.
  */
 export function addPickedDocuments(
+  repos: Repositories,
+  picked: readonly PickedDocument[],
+  options: AddPickedDocumentsOptions,
+): Promise<AddPickedDocumentsResult> {
+  return exclusive(() => {
+    try {
+      return addPickedNow(repos, picked, options);
+    } catch (error) {
+      throw toAppError(error);
+    }
+  });
+}
+
+function addPickedNow(
   repos: Repositories,
   picked: readonly PickedDocument[],
   { now, fallbackName, grantLimit = pickedGrantLimit() }: AddPickedDocumentsOptions,
@@ -321,9 +357,9 @@ export function addPickedDocuments(
       };
     }),
   );
-  // Fold picks of files the scan already indexed into those rows (cheap).
-  // Opportunistic: the picks are stored either way, so a failure is only
-  // reported and the next completed scan retries.
+  // Fold picks of files the scan already indexed into those rows (cheap),
+  // in this same queued task. Opportunistic: the picks are stored either
+  // way, so a failure is only reported and the next completed scan retries.
   try {
     mergePickedDuplicates(repos, {
       withoutMtime: keep

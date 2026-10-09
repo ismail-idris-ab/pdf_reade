@@ -29,7 +29,28 @@ export type LibraryQuery = {
   dir: SortDir;
   /** BCP 47 locale for name sorting; defaults to the runtime's. */
   locale?: string;
+  /** Absolute folder path: only files directly inside it (My Files browsing). */
+  folder?: string;
 };
+
+/** Where a file now lives after a rename or move, with fresh metadata. */
+export type FileLocation = Pick<
+  NewFile,
+  'path' | 'uri' | 'name' | 'ext' | 'mime' | 'size' | 'mtime' | 'source'
+>;
+
+// Rows strictly under `dir` (any depth). substr/length rather than LIKE, so
+// "%" and "_" in folder names are not wildcards.
+function underDir(dir: string): SQL {
+  const prefix = `${dir}/`;
+  return sql`substr(${files.path}, 1, length(${prefix})) = ${prefix}`;
+}
+
+// Rows directly inside `dir` (no further "/" after the prefix).
+function directlyIn(dir: string): SQL {
+  const prefix = `${dir}/`;
+  return sql`(substr(${files.path}, 1, length(${prefix})) = ${prefix} AND instr(substr(${files.path}, length(${prefix}) + 1), '/') = 0)`;
+}
 
 /** A persisted grant used by a row; see listGrantsByAge. */
 export type GrantEntry = { id: number; grant: string; picked: boolean };
@@ -161,6 +182,23 @@ export function createFilesRepository(db: AppDatabase) {
     /** See upsertFile. */
     upsert(file: NewFile): FileRow {
       return upsertFile(db, file);
+    },
+
+    /**
+     * Adds rows for files the app has just created (duplicate, copy, import)
+     * in one transaction: a stale row already at one of those paths is
+     * deleted first (with its cascades) instead of being refreshed, so a new
+     * file never inherits an old row's id, favorite, bookmarks or reading
+     * state. Returns the new rows in order.
+     */
+    replaceAt(rows: readonly NewFile[]): FileRow[] {
+      if (rows.length === 0) return [];
+      return db.transaction((tx) =>
+        rows.map((row) => {
+          tx.delete(files).where(eq(files.path, row.path)).run();
+          return tx.insert(files).values(row).returning().get();
+        }),
+      );
     },
 
     /** Upserts all rows in one transaction: all are written, or none. */
@@ -302,6 +340,7 @@ export function createFilesRepository(db: AppDatabase) {
       sort,
       dir,
       locale,
+      folder,
     }: LibraryQuery): LibraryFile[] {
       const order = dir === 'asc' ? asc : desc;
       const query = db
@@ -311,6 +350,7 @@ export function createFilesRepository(db: AppDatabase) {
           and(
             extGroup === 'all' ? undefined : extGroupCondition(extGroup),
             source === 'all' ? undefined : eq(files.source, source),
+            folder === undefined ? undefined : directlyIn(folder),
           ),
         );
       if (sort !== 'name') return query.orderBy(order(SORT_COLUMN[sort]), order(files.id)).all();
@@ -342,9 +382,16 @@ export function createFilesRepository(db: AppDatabase) {
      * modification time (their stored mtime is the pick time): those match
      * on name and size alone.
      *
+     * My Files rows are never merge targets: they are the app's own copies
+     * (Copy to My Files, Import), so a match there is a separate file, not
+     * the picked document. Excluded by source and, for safety, by the My
+     * Files root (`myFilesRoot`) when known.
+     *
      * Throws (and changes nothing) if any statement fails.
      */
-    mergeContentDuplicates(options: { withoutMtime?: readonly string[] } = {}): MergeContentResult {
+    mergeContentDuplicates(
+      options: { withoutMtime?: readonly string[]; myFilesRoot?: string | null } = {},
+    ): MergeContentResult {
       const withoutMtime = options.withoutMtime ?? [];
       const sizeOnly =
         withoutMtime.length === 0
@@ -353,6 +400,11 @@ export function createFilesRepository(db: AppDatabase) {
               withoutMtime.map((uri) => sql`${uri}`),
               sql`, `,
             )})`;
+      const root = options.myFilesRoot ?? null;
+      const outsideMyFiles =
+        root === null
+          ? sql`1`
+          : sql`m.path <> ${root} AND substr(m.path, 1, length(${`${root}/`})) <> ${`${root}/`}`;
       return db.transaction((tx) => {
         const pairs = tx.all<DuplicatePair>(
           sql`SELECT c.id AS contentId, c.path AS contentPath, c.is_favorite AS contentFavorite,
@@ -361,7 +413,8 @@ export function createFilesRepository(db: AppDatabase) {
                 FROM files c
                 JOIN files p ON p.id = (
                   SELECT m.id FROM files m
-                  WHERE m.path LIKE '/%' AND m.name = c.name AND m.size = c.size
+                  WHERE m.path LIKE '/%' AND m.source <> 'myfiles' AND ${outsideMyFiles}
+                    AND m.name = c.name AND m.size = c.size
                     AND (m.mtime / 1000 = c.mtime / 1000 OR ${sizeOnly})
                   ORDER BY m.id LIMIT 1
                 )
@@ -436,6 +489,102 @@ export function createFilesRepository(db: AppDatabase) {
     /** Deletes the row; bookmarks, reading state and drafts cascade. */
     remove(id: number): void {
       db.delete(files).where(eq(files.id, id)).run();
+    },
+
+    /**
+     * Points a row at its new location after a rename or move, keeping its id
+     * (so favorite, last opened, bookmarks, reading state and drafts stay).
+     * In one transaction: a stale row already holding the new path is
+     * deleted (the file there is now this one); the cached page count is
+     * kept only if size and mtime are unchanged; and when a picked row's
+     * content:// URI changed, path rows using the old URI as their fallback
+     * follow it (the grant moved with the document). Returns the updated
+     * row, or undefined if the id is unknown.
+     */
+    relocate(id: number, next: FileLocation): FileRow | undefined {
+      return db.transaction((tx) => {
+        const old = tx.select().from(files).where(eq(files.id, id)).get();
+        if (old === undefined) return undefined;
+        tx.delete(files)
+          .where(and(eq(files.path, next.path), sql`${files.id} <> ${id}`))
+          .run();
+        const updated = tx
+          .update(files)
+          .set({
+            path: next.path,
+            uri: next.uri,
+            name: next.name,
+            ext: next.ext,
+            mime: next.mime,
+            size: next.size,
+            mtime: next.mtime,
+            source: next.source,
+            pageCount: old.size === next.size && old.mtime === next.mtime ? old.pageCount : null,
+          })
+          .where(eq(files.id, id))
+          .returning()
+          .get();
+        if (old.path.startsWith('content://') && old.path !== next.path) {
+          tx.update(files)
+            .set({ uri: next.path })
+            .where(and(eq(files.uri, old.path), notLike(files.path, 'content://%')))
+            .run();
+        }
+        return updated;
+      });
+    },
+
+    /**
+     * After a folder rename or move: rewrites the paths of every row under
+     * `fromDir` to the same place under `toDir`, keeping ids. In one
+     * transaction, stale rows already under `toDir` (the folder there is now
+     * this one) are deleted first, so the path rewrite cannot hit the unique
+     * path index. The prefix is cut with SQLite's own length(), never a JS
+     * length: JS counts UTF-16 units, SQLite counts characters, and they
+     * differ for emoji. Returns the number of rows moved.
+     */
+    relocateUnder(fromDir: string, toDir: string): number {
+      if (fromDir === toDir) return 0;
+      return db.transaction((tx) => {
+        tx.delete(files)
+          .where(and(underDir(toDir), sql`NOT ${underDir(fromDir)}`))
+          .run();
+        return tx
+          .update(files)
+          .set({ path: sql`${toDir} || substr(${files.path}, length(${fromDir}) + 1)` })
+          .where(underDir(fromDir))
+          .returning({ id: files.id })
+          .all().length;
+      });
+    },
+
+    /**
+     * Deletes every row under `dir` (any depth) in one transaction; their
+     * bookmarks, reading state and drafts cascade. Returns how many rows went
+     * and the content:// grants those rows used, for the caller to release
+     * once no other row uses them.
+     */
+    removeUnder(dir: string): { removed: number; grants: string[] } {
+      return db.transaction((tx) => {
+        const rows = tx
+          .delete(files)
+          .where(underDir(dir))
+          .returning({ path: files.path, uri: files.uri })
+          .all();
+        const grants = rows
+          .map((row) => (row.path.startsWith('content://') ? row.path : row.uri))
+          .filter((uri): uri is string => uri !== null && uri.startsWith('content://'));
+        return { removed: rows.length, grants };
+      });
+    },
+
+    /** Id, path, size and mtime of every row under `dir` (any depth). */
+    listUnder(dir: string): Pick<FileRow, 'id' | 'path' | 'size' | 'mtime'>[] {
+      return db
+        .select({ id: files.id, path: files.path, size: files.size, mtime: files.mtime })
+        .from(files)
+        .where(underDir(dir))
+        .all();
     },
 
     /** Full-text search on file names, best matches first. */

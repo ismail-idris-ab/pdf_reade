@@ -132,8 +132,13 @@ describe('LibraryScreen', () => {
     expect(
       screen.getByText(`1.5 MB · ${formatDate(Date.UTC(2026, 9, 2, 12), 'en')}`),
     ).toBeOnTheScreen();
-    // Rows are not pressable until the reader exists.
-    expect(screen.queryAllByRole('button', { name: /banana report/ })).toEqual([]);
+    // Rows do not open files until the reader exists; the only control on a
+    // row is its actions button.
+    expect(
+      screen
+        .queryAllByRole('button', { name: /banana report/ })
+        .map((node) => node.props.accessibilityLabel as string),
+    ).toEqual(['More actions for banana report.pdf']);
   });
 
   it('filters by type tab and by source chip', async () => {
@@ -155,12 +160,23 @@ describe('LibraryScreen', () => {
     expect(useLibraryPrefsStore.getState()).toMatchObject({ tab: 'all', chip: 'whatsapp' });
   });
 
-  it('shows a neutral empty state for a source with no files (My Files)', async () => {
+  it('shows a neutral empty state for a source with no files (Scans)', async () => {
+    seed();
+    await renderLibrary();
+    await fireEvent.press(screen.getByTestId('library-chip-scans'));
+    expect(rowNames()).toEqual([]);
+    expect(screen.getByText('No files here yet')).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: 'Pick files' })).toBeNull();
+  });
+
+  it('browses My Files (empty) with folder actions instead of the library empty state', async () => {
     seed();
     await renderLibrary();
     await fireEvent.press(screen.getByTestId('library-chip-myfiles'));
+    await waitFor(() => expect(screen.getByText('This folder is empty')).toBeOnTheScreen());
     expect(rowNames()).toEqual([]);
-    expect(screen.getByText('No files here yet')).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'New folder' })).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Import' })).toBeOnTheScreen();
     expect(screen.queryByRole('button', { name: 'Pick files' })).toBeNull();
   });
 

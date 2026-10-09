@@ -8,16 +8,19 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.database.Cursor
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.os.CancellationSignal
 import android.os.Environment
-import android.os.storage.StorageManager
-import android.provider.DocumentsContract
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
 import android.provider.OpenableColumns
 import android.provider.Settings
-import android.system.ErrnoException
-import android.system.OsConstants
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.content.ContextCompat
@@ -35,7 +38,10 @@ import expo.modules.kotlin.records.Record
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -45,6 +51,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -74,6 +81,14 @@ class PickOptions : Record {
   /** Whether the user may select several documents. */
   @Field
   val multiple: Boolean = false
+
+  /**
+   * Whether to persist the grants of the picked documents (default). False
+   * for one-off use: only the temporary read grant is used and every item
+   * reports `persisted: false`.
+   */
+  @Field
+  val persist: Boolean = true
 }
 
 class FileIndexModule : Module() {
@@ -86,7 +101,7 @@ class FileIndexModule : Module() {
   private val scanCancelFlags = ConcurrentHashMap<String, AtomicBoolean>()
 
   /** A picker launch waiting for its result. Identity matters: one per call. */
-  private class PendingPick(val requestCode: Int, val promise: Promise)
+  private class PendingPick(val requestCode: Int, val promise: Promise, val persist: Boolean)
 
   // Whoever removes a PendingPick from the slot owns settling its promise,
   // so each promise is settled exactly once.
@@ -106,6 +121,21 @@ class FileIndexModule : Module() {
     }
 
     Events(EVENT_SCAN_BATCH, EVENT_SCAN_COMPLETE, EVENT_SCAN_ERROR)
+
+    OnCreate {
+      // Repairs what a crash left behind (interrupted case-only renames,
+      // unfinished copies) once per module start, off the main thread.
+      scope.launch {
+        try {
+          actions.replayJournal()
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          // Class only: messages of file exceptions can contain paths.
+          Log.w(TAG, "Journal replay skipped: ${e.javaClass.simpleName}")
+        }
+      }
+    }
 
     OnDestroy {
       scanCancelFlags.values.forEach { it.set(true) }
@@ -159,7 +189,107 @@ class FileIndexModule : Module() {
     Function("releasePersistedUri") { uri: String ->
       releasePersistedUri(uri)
     }
+
+    // region file actions (apiVersion 4)
+
+    Function("getMyFilesRoot") {
+      try {
+        actions.myFilesRoot().path
+      } catch (e: Throwable) {
+        throw IoFailures.map(e, FileOpCodes.ERR_FILE_OP_FAILED, "Cannot create the My Files folder")
+      }
+    }
+
+    AsyncFunction("renameFile") Coroutine { path: String, newName: String ->
+      actions.renameFile(path, newName).toMap()
+    }
+
+    AsyncFunction("moveFile") Coroutine { path: String, destDir: String ->
+      actions.moveFile(path, destDir).toMap()
+    }
+
+    AsyncFunction("copyFile") Coroutine { path: String, destDir: String ->
+      actions.copyFile(path, destDir).toMap()
+    }
+
+    AsyncFunction("deleteFile") Coroutine { path: String ->
+      actions.deleteFile(path)
+    }
+
+    AsyncFunction("listFolder") Coroutine { path: String ->
+      val (folder, entries) = actions.listFolder(path)
+      mapOf("path" to folder, "entries" to entries.map { it.toMap() })
+    }
+
+    AsyncFunction("folderStats") Coroutine { path: String ->
+      val stats = actions.folderStats(path)
+      mapOf(
+        "fileCount" to stats.fileCount.toDouble(),
+        "folderCount" to stats.folderCount.toDouble(),
+        "totalBytes" to stats.totalBytes.toDouble(),
+      )
+    }
+
+    AsyncFunction("createFolder") Coroutine { parent: String, name: String ->
+      actions.createFolder(parent, name).toMap()
+    }
+
+    AsyncFunction("renameFolder") Coroutine { path: String, newName: String ->
+      actions.renameFolder(path, newName).toMap()
+    }
+
+    AsyncFunction("deleteFolder") Coroutine { path: String ->
+      actions.deleteFolder(path)
+    }
+
+    AsyncFunction("importDocuments") Coroutine { uris: List<String>, destDir: String ->
+      actions.importDocuments(uris, destDir).map { item ->
+        buildMap<String, Any?> {
+          put("uri", item.uri)
+          item.file?.let { put("file", it.toMap()) }
+          item.errorCode?.let { put("errorCode", it) }
+        }
+      }
+    }
+
+    AsyncFunction("documentCapabilities") Coroutine { uri: String ->
+      val caps = actions.documentCapabilities(uri)
+      mapOf("canRename" to caps.canRename, "canDelete" to caps.canDelete)
+    }
+
+    AsyncFunction("renameDocument") Coroutine { uri: String, newName: String ->
+      val renamed = actions.renameDocument(uri, newName)
+      mapOf("uri" to renamed.uri, "name" to renamed.name, "renamed" to renamed.renamed)
+    }
+
+    AsyncFunction("deleteDocument") Coroutine { uri: String ->
+      actions.deleteDocument(uri)
+    }
+
+    AsyncFunction("printPdf") Coroutine { source: String, jobName: String ->
+      printPdf(source, jobName)
+    }
+
+    // endregion
   }
+
+  private val actions: FileActions
+    get() = FileActions(context)
+
+  private fun FileInfo.toMap(): Map<String, Any?> = mapOf(
+    "path" to path,
+    "name" to name,
+    "size" to size.toDouble(),
+    "mtime" to mtime.toDouble(),
+  )
+
+  private fun FolderEntryInfo.toMap(): Map<String, Any?> = mapOf(
+    "path" to path,
+    "name" to name,
+    "isDirectory" to isDirectory,
+    "size" to size.toDouble(),
+    "mtime" to mtime.toDouble(),
+  )
 
   private fun moduleDestroyed() = CodedException(ERR_MODULE_DESTROYED, "The file module is shutting down", null)
 
@@ -285,7 +415,7 @@ class FileIndexModule : Module() {
           return@launch
         }
         val scanner = DocumentScanner(
-          roots = storageRoots(),
+          roots = actions.sharedRoots(),
           extensions = extensions,
           knownMtimes = knownMtimes,
           isCancelled = { cancelFlag.get() || !scanContext.isActive },
@@ -344,33 +474,6 @@ class FileIndexModule : Module() {
     } catch (e: Exception) {
       // The JS side is gone (e.g. reload mid-scan); nothing left to notify.
       Log.w(TAG, "Could not deliver scan error: ${e.javaClass.simpleName}")
-    }
-  }
-
-  /** Primary shared storage plus, on API 30+, every other mounted volume. */
-  // getExternalStorageDirectory is deprecated for scoped apps but is the
-  // documented primary root for apps holding all-files access.
-  @Suppress("DEPRECATION")
-  private fun storageRoots(): List<File> {
-    val roots = ArrayList<File>()
-    roots.add(Environment.getExternalStorageDirectory())
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      val storageManager = context.getSystemService(StorageManager::class.java)
-      storageManager?.storageVolumes?.forEach { volume ->
-        val state = volume.state
-        if (state == Environment.MEDIA_MOUNTED || state == Environment.MEDIA_MOUNTED_READ_ONLY) {
-          volume.directory?.let { roots.add(it) }
-        }
-      }
-    }
-    val seen = HashSet<String>()
-    return roots.filter { root ->
-      val key = try {
-        root.canonicalPath
-      } catch (_: IOException) {
-        root.absolutePath
-      }
-      seen.add(key)
     }
   }
 
@@ -447,7 +550,7 @@ class FileIndexModule : Module() {
       )
     } catch (e: Throwable) {
       dir?.deleteRecursively()
-      throw mapIoFailure(e, ERR_IMPORT_FAILED, "Cannot import this document")
+      throw IoFailures.map(e, ERR_IMPORT_FAILED, "Cannot import this document")
     }
   }
 
@@ -524,7 +627,7 @@ class FileIndexModule : Module() {
         }
       }
     } catch (e: Throwable) {
-      throw mapIoFailure(e, ERR_SHARE_FAILED, "Cannot share these files")
+      throw IoFailures.map(e, ERR_SHARE_FAILED, "Cannot share these files")
     }
   }
 
@@ -554,7 +657,7 @@ class FileIndexModule : Module() {
       promise.reject(moduleDestroyed())
       return
     }
-    val pick = PendingPick(DocumentPick.requestCodeFor(pickSequence.getAndIncrement()), promise)
+    val pick = PendingPick(DocumentPick.requestCodeFor(pickSequence.getAndIncrement()), promise, options.persist)
     // A newer call replaces a pending one, so a result the system never
     // delivered cannot block picking until restart. The replaced promise is
     // settled here; its late result, if any, no longer matches a request code.
@@ -572,7 +675,13 @@ class FileIndexModule : Module() {
       type = filter.type
       filter.extraMimeTypes?.let { putExtra(Intent.EXTRA_MIME_TYPES, it.toTypedArray()) }
       putExtra(Intent.EXTRA_ALLOW_MULTIPLE, options.multiple)
-      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+      // Write is requested too so picked documents can be renamed/deleted
+      // through their provider; providers that refuse it still grant read.
+      addFlags(
+        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+          Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+          Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+      )
     }
     // If the scope is cancelled before this runs, OnDestroy has already
     // rejected the pending promise.
@@ -600,7 +709,8 @@ class FileIndexModule : Module() {
   /** Called on the main thread when a picker returns. */
   private fun onPickResult(requestCode: Int, resultCode: Int, data: Intent?) {
     // A result for a replaced launch is ignored: its promise is already settled.
-    val promise = pendingPick.takeIf { it.requestCode == requestCode }?.promise ?: return
+    val pick = pendingPick.takeIf { it.requestCode == requestCode } ?: return
+    val promise = pick.promise
     if (resultCode != Activity.RESULT_OK || data == null) {
       promise.resolve(emptyList<Map<String, Any?>>())
       return
@@ -625,8 +735,9 @@ class FileIndexModule : Module() {
     val owner = AtomicReference<Promise?>(promise)
     val job = scope.launch {
       try {
-        val resolver = context.contentResolver
-        val items = uris.map { describePicked(resolver, it) }
+        val writeGranted = data.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0
+        val mode = DocumentPick.persistMode(pick.persist, writeGranted)
+        val items = uris.map { describePicked(it, mode) }
         owner.getAndSet(null)?.resolve(items)
       } catch (e: CancellationException) {
         throw e
@@ -640,19 +751,16 @@ class FileIndexModule : Module() {
   }
 
   /**
-   * Tries to persist the read grant and reads the provider metadata of one
-   * picked document. The item's `persisted` field is false when the provider
-   * offered no persistable grant: the URI then works only in this session.
-   * Metadata the provider refuses or lacks is returned as null.
+   * Persists the grant per [mode] (see [DocumentPick.persistMode]) and reads
+   * the provider metadata of one picked document. The item's `persisted`
+   * field tells whether read is persisted; when false the URI works only in
+   * this session. Metadata the provider refuses or lacks is returned as null.
    */
-  private fun describePicked(resolver: ContentResolver, uriString: String): Map<String, Any?> {
+  private fun describePicked(uriString: String, mode: GrantMode): Map<String, Any?> {
+    val resolver = context.contentResolver
     val uri = uriString.toUri()
-    val persisted = try {
-      resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      true
-    } catch (_: SecurityException) {
-      false
-    }
+    val persisted = mode != GrantMode.NONE &&
+      actions.persistGrant(uri, tryWrite = mode == GrantMode.READ_WRITE) != GrantMode.NONE
     val mime = try {
       resolver.getType(uri)
     } catch (_: SecurityException) {
@@ -660,55 +768,8 @@ class FileIndexModule : Module() {
     } catch (_: IllegalArgumentException) {
       null
     }
-    val meta = queryPickedMetadata(resolver, uri)
+    val meta = ProviderQueries.metadata(resolver, uri)
     return DocumentPick.pickedDocument(uriString, meta.name, meta.size, mime, meta.mtime, persisted)
-  }
-
-  private class PickedMetadata(val name: String?, val size: Long?, val mtime: Long?)
-
-  private fun queryPickedMetadata(resolver: ContentResolver, uri: Uri): PickedMetadata {
-    val empty = PickedMetadata(null, null, null)
-    val withMtime = arrayOf(
-      OpenableColumns.DISPLAY_NAME,
-      OpenableColumns.SIZE,
-      DocumentsContract.Document.COLUMN_LAST_MODIFIED,
-    )
-    val basic = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
-    return try {
-      val cursor = try {
-        resolver.query(uri, withMtime, null, null, null)
-      } catch (_: IllegalArgumentException) {
-        // Provider rejects the last-modified column: retry without it.
-        resolver.query(uri, basic, null, null, null)
-      }
-      cursor?.use {
-        if (it.moveToFirst()) {
-          PickedMetadata(
-            name = it.stringOrNull(OpenableColumns.DISPLAY_NAME),
-            size = it.longOrNull(OpenableColumns.SIZE),
-            mtime = it.longOrNull(DocumentsContract.Document.COLUMN_LAST_MODIFIED),
-          )
-        } else {
-          null
-        }
-      } ?: empty
-    } catch (_: SecurityException) {
-      empty
-    } catch (_: IllegalArgumentException) {
-      empty
-    } catch (_: UnsupportedOperationException) {
-      empty
-    }
-  }
-
-  private fun Cursor.stringOrNull(column: String): String? {
-    val index = getColumnIndex(column)
-    return if (index >= 0 && !isNull(index)) getString(index) else null
-  }
-
-  private fun Cursor.longOrNull(column: String): Long? {
-    val index = getColumnIndex(column)
-    return if (index >= 0 && !isNull(index)) getLong(index) else null
   }
 
   private fun listPersistedUris(): List<String> =
@@ -716,13 +777,10 @@ class FileIndexModule : Module() {
       context.contentResolver.persistedUriPermissions.map { it.uri.toString() to it.isReadPermission },
     )
 
-  /** Releases a persisted read grant; a grant that is not held is ignored. */
+  /** Releases every persisted grant (read and write) for a URI; one that is not held is ignored. */
   private fun releasePersistedUri(uriString: String) {
     try {
-      context.contentResolver.releasePersistableUriPermission(
-        uriString.toUri(),
-        Intent.FLAG_GRANT_READ_URI_PERMISSION,
-      )
+      actions.releaseGrant(uriString.toUri())
     } catch (_: SecurityException) {
       // Not held: already released or never granted.
     } catch (_: IllegalArgumentException) {
@@ -756,43 +814,166 @@ class FileIndexModule : Module() {
     return total
   }
 
+  // endregion
+
+  // region print
+
   /**
-   * Maps any failure to a coded exception with a static message, so no
-   * exception text (which can hold URIs or paths) reaches JS. Errno checks run
-   * before the FileNotFoundException branch because FileInputStream and
-   * FileOutputStream report EACCES/EPERM/EROFS/ENOSPC as FileNotFoundException.
-   * Anything unrecognised gets [fallbackCode], a non-shared ERR_* code.
+   * Opens the system print dialog for a PDF (absolute path or content:// URI).
+   * Resolves once the dialog is shown; the print job itself is not awaited.
    */
-  private fun mapIoFailure(error: Throwable, fallbackCode: String, message: String): Throwable = when {
-    error is CancellationException || error is CodedException -> error
-    error is OutOfMemoryError -> FileIndexException(ErrorCode.OUT_OF_MEMORY, message)
-    hasErrno(error, OsConstants.ENOSPC, "ENOSPC", "No space left on device") ->
-      FileIndexException(ErrorCode.NO_SPACE, message)
-    hasErrno(error, OsConstants.EACCES, "EACCES", "Permission denied") ||
-      hasErrno(error, OsConstants.EPERM, "EPERM", "Operation not permitted") ||
-      hasErrno(error, OsConstants.EROFS, "EROFS", "Read-only file system") ->
-      FileIndexException(ErrorCode.PERMISSION_DENIED, message)
-    error is SecurityException -> FileIndexException(ErrorCode.PERMISSION_DENIED, message)
-    error is FileNotFoundException -> FileIndexException(ErrorCode.NOT_FOUND, message)
-    else -> CodedException(fallbackCode, message, null)
+  private suspend fun printPdf(source: String, jobName: String) {
+    val ctx = context
+    val opener = withContext(Dispatchers.IO) {
+      try {
+        printSource(ctx, source)
+      } catch (e: Throwable) {
+        throw IoFailures.map(e, ERR_PRINT_FAILED, "Cannot print this document")
+      }
+    }
+    withContext(Dispatchers.Main) {
+      val activity = appContext.currentActivity
+        ?: throw CodedException(ERR_NO_ACTIVITY, "No screen is available to show the print dialog", null)
+      val printManager = activity.getSystemService(PrintManager::class.java)
+        ?: throw FileIndexException(ErrorCode.UNSUPPORTED, "Printing is not available")
+      val name = jobName.trim().ifEmpty { FileNames.FALLBACK_NAME }
+      try {
+        printManager.print(name, PdfPrintAdapter(name, opener, scope), null)
+      } catch (e: Throwable) {
+        throw IoFailures.map(e, ERR_PRINT_FAILED, "Cannot open the print dialog")
+      }
+    }
   }
 
-  /** True when [errno] (as ErrnoException) or one of [markers] appears in the cause chain. */
-  private fun hasErrno(error: Throwable, errno: Int, vararg markers: String): Boolean {
-    var current: Throwable? = error
-    while (current != null) {
-      if (current is ErrnoException && current.errno == errno) return true
-      val text = current.message
-      if (text != null && markers.any { text.contains(it) }) return true
-      current = current.cause
+  /**
+   * Checks that [source] is a readable PDF and returns how to open it. Paths
+   * must lie in shared storage or My Files (PERMISSION_DENIED otherwise) and
+   * end in ".pdf"; content URIs must report application/pdf or a ".pdf"
+   * display name.
+   */
+  private fun printSource(ctx: Context, source: String): () -> InputStream {
+    val uri = source.toUri()
+    if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+      val resolver = ctx.contentResolver
+      val mime = try {
+        resolver.getType(uri)
+      } catch (_: IllegalArgumentException) {
+        null
+      }
+      val name = ProviderQueries.metadata(resolver, uri).name
+      val isPdf = mime == PDF_MIME || (name != null && DocumentScanner.extensionOf(name) == PDF_EXT)
+      if (!isPdf) throw FileIndexException(ErrorCode.UNSUPPORTED, "Only PDF documents can be printed")
+      // Fails now (not inside the dialog) when the document is gone or not readable.
+      (resolver.openInputStream(uri) ?: throw FileNotFoundException("Provider returned no stream")).close()
+      return { resolver.openInputStream(uri) ?: throw FileNotFoundException("Provider returned no stream") }
     }
-    return false
+    // Same allowed roots as the other file actions (shared storage or My Files).
+    val file = FileActions(ctx).resolveReadablePath(source)
+    if (DocumentScanner.extensionOf(file.name) != PDF_EXT) {
+      throw FileIndexException(ErrorCode.UNSUPPORTED, "Only PDF documents can be printed")
+    }
+    if (!file.isFile) throw FileIndexException(ErrorCode.NOT_FOUND, "The document no longer exists")
+    if (!file.canRead()) throw FileIndexException(ErrorCode.PERMISSION_DENIED, "Cannot read this document")
+    return { file.inputStream() }
+  }
+
+  /**
+   * Streams a PDF into the print framework. Writing runs on Dispatchers.IO in
+   * the module scope and stops when the framework cancels it; callbacks are
+   * delivered on the main thread.
+   */
+  private class PdfPrintAdapter(
+    private val name: String,
+    private val open: () -> InputStream,
+    private val scope: CoroutineScope,
+  ) : PrintDocumentAdapter() {
+    // Both only touched on the main thread (framework callbacks and delivery).
+    private var writeJob: Job? = null
+    private var writeGeneration = 0
+
+    override fun onLayout(
+      oldAttributes: PrintAttributes?,
+      newAttributes: PrintAttributes,
+      cancellationSignal: CancellationSignal,
+      callback: LayoutResultCallback,
+      extras: Bundle?,
+    ) {
+      if (cancellationSignal.isCanceled) {
+        callback.onLayoutCancelled()
+        return
+      }
+      val info = PrintDocumentInfo.Builder(name)
+        .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+        .setPageCount(PrintDocumentInfo.PAGE_COUNT_UNKNOWN)
+        .build()
+      // The document does not depend on the attributes: only the first layout changes it.
+      callback.onLayoutFinished(info, oldAttributes == null)
+    }
+
+    override fun onWrite(
+      pages: Array<out PageRange>,
+      destination: ParcelFileDescriptor,
+      cancellationSignal: CancellationSignal,
+      callback: WriteResultCallback,
+    ) {
+      // A newer write supersedes the running one: its outcome is ignored.
+      val generation = ++writeGeneration
+      writeJob?.cancel()
+      if (!scope.isActive) {
+        callback.onWriteFailed(null)
+        return
+      }
+      // ATOMIC: the body always runs, even when cancelled before it starts,
+      // so exactly one callback is delivered for this write.
+      val job = scope.launch(Dispatchers.IO, start = CoroutineStart.ATOMIC) {
+        val outcome = try {
+          open().use { input ->
+            FileOutputStream(destination.fileDescriptor).use { output ->
+              val buffer = ByteArray(COPY_BUFFER_BYTES)
+              while (true) {
+                ensureActive()
+                if (cancellationSignal.isCanceled) throw CancellationException("Print cancelled")
+                val read = input.read(buffer)
+                if (read < 0) break
+                output.write(buffer, 0, read)
+              }
+              output.flush()
+            }
+          }
+          WriteOutcome.FINISHED
+        } catch (_: CancellationException) {
+          WriteOutcome.CANCELLED
+        } catch (e: Throwable) {
+          // Class only: messages of file exceptions can contain paths.
+          Log.w(TAG, "Print write failed: ${e.javaClass.simpleName}")
+          WriteOutcome.FAILED
+        }
+        withContext(NonCancellable + Dispatchers.Main) {
+          if (generation != writeGeneration) return@withContext
+          when (outcome) {
+            WriteOutcome.FINISHED -> callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+            WriteOutcome.CANCELLED -> callback.onWriteCancelled()
+            // null: no technical (untranslated) text in the system dialog.
+            WriteOutcome.FAILED -> callback.onWriteFailed(null)
+          }
+        }
+      }
+      writeJob = job
+      cancellationSignal.setOnCancelListener { job.cancel() }
+    }
+
+    override fun onFinish() {
+      writeJob?.cancel()
+      writeJob = null
+    }
+
+    private enum class WriteOutcome { FINISHED, CANCELLED, FAILED }
   }
 
   // endregion
 
   companion object {
-    const val API_VERSION = 3
+    const val API_VERSION = 4
 
     private const val TAG = "FileIndex"
 
@@ -816,5 +997,9 @@ class FileIndexModule : Module() {
     private const val ERR_NO_ACTIVITY = "ERR_NO_ACTIVITY"
     private const val ERR_NO_PICKER = "ERR_NO_PICKER"
     private const val ERR_PICK_FAILED = "ERR_PICK_FAILED"
+    private const val ERR_PRINT_FAILED = "ERR_PRINT_FAILED"
+
+    private const val PDF_MIME = "application/pdf"
+    private const val PDF_EXT = "pdf"
   }
 }

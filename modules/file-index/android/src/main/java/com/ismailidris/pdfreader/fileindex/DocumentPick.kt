@@ -34,6 +34,17 @@ object DocumentPick {
     return all.distinct()
   }
 
+  /**
+   * Grant to persist for a picked document: NONE when the caller asked not to
+   * persist (the temporary read grant of the result is used as is), READ_WRITE
+   * when the picker granted write (falling back to read), otherwise READ.
+   */
+  fun persistMode(persistRequested: Boolean, writeGranted: Boolean): GrantMode = when {
+    !persistRequested -> GrantMode.NONE
+    writeGranted -> GrantMode.READ_WRITE
+    else -> GrantMode.READ
+  }
+
   /** Read-granted entries of the persisted URI permission list. */
   fun readGranted(permissions: List<Pair<String, Boolean>>): List<String> =
     permissions.filter { it.second }.map { it.first }.distinct()
