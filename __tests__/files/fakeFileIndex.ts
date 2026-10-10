@@ -5,7 +5,9 @@
 //
 // The file actions (apiVersion 4) run against a small in-memory filesystem:
 // seed it with `addFile` / `addFolder`, inspect it with `exists`, and reset it
-// with `resetFs` in `beforeEach`. Every function is a jest.fn, so tests can
+// with `resetFs` in `beforeEach`. Shared-storage write access (apiVersion 5)
+// starts granted; `setSharedWriteAccess` / `setSharedWriteRequestOutcome`
+// control it (`resetFs` resets them too). Every function is a jest.fn, so tests can
 // still override single calls (e.g. `mockRejectedValueOnce`).
 import type {
   CachedContent,
@@ -22,6 +24,7 @@ import type {
   ScanBatchEvent,
   ScanCompleteEvent,
   ScanErrorEvent,
+  SharedWriteAccessResult,
 } from '../../modules/file-index/src/FileIndexModule';
 
 type Listeners = { [K in keyof FileIndexEvents]: Set<FileIndexEvents[K]> };
@@ -64,6 +67,8 @@ function createFakeFileIndex() {
   const nodes = new Map<string, Node>();
   const documents = new Map<string, FakeDocument>();
   const refusingRename = new Set<string>();
+  let sharedWriteGranted = true;
+  let sharedWriteOutcome: SharedWriteAccessResult = 'granted';
   let clock = 1_700_000_000_000;
   const now = () => (clock += 1000);
 
@@ -80,6 +85,8 @@ function createFakeFileIndex() {
     nodes.clear();
     documents.clear();
     refusingRename.clear();
+    sharedWriteGranted = true;
+    sharedWriteOutcome = 'granted';
     nodes.set(FAKE_MY_FILES_ROOT, { isDirectory: true, size: 0, mtime: 0 });
   }
   resetFs();
@@ -143,7 +150,7 @@ function createFakeFileIndex() {
   };
 
   return {
-    apiVersion: 4,
+    apiVersion: 5,
     addListener: jest.fn(addListener),
     hasAllFilesAccess: jest.fn<boolean, []>(() => true),
     openAllFilesAccessSettings: jest.fn<Promise<void>, []>(() => Promise.resolve()),
@@ -165,6 +172,14 @@ function createFakeFileIndex() {
     ),
     listPersistedUris: jest.fn<string[], []>(() => []),
     releasePersistedUri: jest.fn<void, [string]>(),
+
+    hasSharedWriteAccess: jest.fn<boolean, []>(() => sharedWriteGranted),
+    // Answers with the outcome set by setSharedWriteRequestOutcome; 'granted'
+    // also grants access from then on, as the system permission would.
+    requestSharedWriteAccess: jest.fn<Promise<SharedWriteAccessResult>, []>(async () => {
+      if (sharedWriteOutcome === 'granted') sharedWriteGranted = true;
+      return sharedWriteOutcome;
+    }),
 
     getMyFilesRoot: jest.fn<string, []>(() => FAKE_MY_FILES_ROOT),
     renameFile: jest.fn<Promise<FileOpResult>, [string, string]>(async (path, newName) => {
@@ -298,6 +313,14 @@ function createFakeFileIndex() {
     },
     hasDocument(uri: string): boolean {
       return documents.has(uri);
+    },
+    /** Sets what hasSharedWriteAccess answers. */
+    setSharedWriteAccess(granted: boolean) {
+      sharedWriteGranted = granted;
+    },
+    /** Sets what later requestSharedWriteAccess calls resolve with. */
+    setSharedWriteRequestOutcome(outcome: SharedWriteAccessResult) {
+      sharedWriteOutcome = outcome;
     },
     /** Makes renameDocument keep this document's old name (renamed: false). */
     refuseRename(uri: string) {

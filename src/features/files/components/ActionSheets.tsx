@@ -43,9 +43,11 @@ export type ActionContext = {
   /** What the provider allows for a picked document; null while unknown. */
   capabilities: DocumentCapabilities | null;
   /**
-   * Whether the app may change files in shared storage right now (see
-   * canChangeSharedStorage). False hides rename, move, duplicate and delete
-   * for files outside My Files that were not picked.
+   * Whether to offer changes to files in shared storage (see
+   * canChangeSharedStorage: always on Android 8–10, where the first use asks
+   * for the permission; with all-files access on Android 11+). False hides
+   * rename, move, duplicate and delete for files outside My Files that were
+   * not picked.
    */
   sharedStorageWritable: boolean;
   /** The My Files root (files under it are always app-writable). */

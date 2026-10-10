@@ -164,6 +164,13 @@ export const en = {
     removeFromLibrary: 'Remove from library',
     removedFromLibrary: 'Removed from library',
     allowAccessToChange: 'Allow all-files access so the app can change files on your phone.',
+    writeAccessTitle: 'Allow storage access',
+    writeAccessMessage:
+      'To change files on your phone, the app needs storage permission. Android will ask you next.',
+    writeAccessContinue: 'Continue',
+    writeAccessDenied: 'Storage permission is needed to change files on your phone.',
+    writeAccessBlocked:
+      'Storage permission is turned off. Allow it in Settings to change files on your phone.',
     moveTitle: 'Move to',
     copyTitle: 'Copy to My Files',
     moveHere: 'Move here',

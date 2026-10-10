@@ -167,6 +167,13 @@ export const ha: Catalog = {
     removedFromLibrary: 'An cire daga ɗakin karatu',
     allowAccessToChange:
       'Ba da izinin shiga duk fayiloli domin manhajar ta iya canza fayiloli a wayarka.',
+    writeAccessTitle: 'Ba da izinin ma’ajiya',
+    writeAccessMessage:
+      'Domin canza fayiloli a wayarka, manhajar tana buƙatar izinin ma’ajiya. Android za ta tambaye ka a gaba.',
+    writeAccessContinue: 'Ci gaba',
+    writeAccessDenied: 'Ana buƙatar izinin ma’ajiya domin canza fayiloli a wayarka.',
+    writeAccessBlocked:
+      'An kashe izinin ma’ajiya. Ka ba da shi a Saituna domin canza fayiloli a wayarka.',
     moveTitle: 'Matsar zuwa',
     copyTitle: 'Kwafa zuwa Fayilolina',
     moveHere: 'Matsar nan',

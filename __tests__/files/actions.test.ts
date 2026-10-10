@@ -19,8 +19,15 @@ import {
   renameMyFilesFolder,
   setFileFavorite,
   shareLibraryFile,
+  usesLegacyWritePermission,
 } from '@/features/files/actions';
 import { availableFileActions } from '@/features/files/components/ActionSheets';
+import {
+  answerWriteAccessExplainer,
+  ensureSharedWriteAccess,
+  explainSharedWriteAccess,
+  useWriteAccessExplainerStore,
+} from '@/features/files/sharedWriteAccess';
 import { describeLocation as describeLocationForTest } from '@/features/files/location';
 import { createInFlightGuard } from '@/features/files/useInFlight';
 import { AppError } from '@/lib/errors';
@@ -699,13 +706,100 @@ describe('operations run one at a time', () => {
 });
 
 describe('canChangeSharedStorage', () => {
-  it('needs Android 11+ and all-files access', () => {
+  it('needs all-files access on Android 11+', () => {
     expect(canChangeSharedStorage(true, 30)).toBe(true);
     expect(canChangeSharedStorage(true, 34)).toBe(true);
+    expect(canChangeSharedStorage(false, 30)).toBe(false);
     expect(canChangeSharedStorage(false, 34)).toBe(false);
-    expect(canChangeSharedStorage(true, 29)).toBe(false);
-    expect(canChangeSharedStorage(true, 26)).toBe(false);
+  });
+
+  it('always offers the actions on Android 8–10 (the permission is asked on first use)', () => {
+    expect(canChangeSharedStorage(true, 29)).toBe(true);
+    expect(canChangeSharedStorage(false, 29)).toBe(true);
+    expect(canChangeSharedStorage(false, 26)).toBe(true);
+  });
+
+  it('offers nothing off Android', () => {
     expect(canChangeSharedStorage(true, 'ios-17')).toBe(false);
+  });
+});
+
+describe('usesLegacyWritePermission', () => {
+  it('is true only below Android 11', () => {
+    expect(usesLegacyWritePermission(26)).toBe(true);
+    expect(usesLegacyWritePermission(29)).toBe(true);
+    expect(usesLegacyWritePermission(30)).toBe(false);
+    expect(usesLegacyWritePermission(35)).toBe(false);
+    expect(usesLegacyWritePermission('ios-17')).toBe(false);
+  });
+});
+
+describe('ensureSharedWriteAccess', () => {
+  const explain = jest.fn<Promise<boolean>, []>();
+
+  beforeEach(() => {
+    native.resetFs();
+    explain.mockReset();
+  });
+
+  it('never asks on Android 11+', async () => {
+    native.setSharedWriteAccess(false);
+    await expect(ensureSharedWriteAccess(explain, 30)).resolves.toBe('granted');
+    await expect(ensureSharedWriteAccess(explain, 34)).resolves.toBe('granted');
+    expect(explain).not.toHaveBeenCalled();
+    expect(native.hasSharedWriteAccess).not.toHaveBeenCalled();
+    expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+  });
+
+  it('goes ahead without asking when the permission is held', async () => {
+    await expect(ensureSharedWriteAccess(explain, 29)).resolves.toBe('granted');
+    expect(explain).not.toHaveBeenCalled();
+    expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+  });
+
+  it('explains first, and asks nothing when the explanation is cancelled', async () => {
+    native.setSharedWriteAccess(false);
+    explain.mockResolvedValueOnce(false);
+    await expect(ensureSharedWriteAccess(explain, 29)).resolves.toBe('cancelled');
+    expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+  });
+
+  it.each(['granted', 'denied', 'blocked'] as const)(
+    'explains, then asks the system and answers %s',
+    async (outcome) => {
+      native.setSharedWriteAccess(false);
+      native.setSharedWriteRequestOutcome(outcome);
+      explain.mockResolvedValueOnce(true);
+      await expect(ensureSharedWriteAccess(explain, 26)).resolves.toBe(outcome);
+      expect(explain).toHaveBeenCalledTimes(1);
+      expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('asks when the permission check fails, and rejects with an AppError when the prompt fails', async () => {
+    native.hasSharedWriteAccess.mockImplementationOnce(() => {
+      throw Object.assign(new Error('boom'), { code: 'UNKNOWN' });
+    });
+    native.requestSharedWriteAccess.mockRejectedValueOnce(
+      Object.assign(new Error('no activity'), { code: 'UNSUPPORTED' }),
+    );
+    explain.mockResolvedValueOnce(true);
+    await expect(ensureSharedWriteAccess(explain, 29)).rejects.toMatchObject({
+      name: 'AppError',
+      code: 'UNSUPPORTED',
+    });
+  });
+});
+
+describe('explainSharedWriteAccess', () => {
+  it('resolves with the first answer; a newer explanation cancels an open one', async () => {
+    const first = explainSharedWriteAccess();
+    const second = explainSharedWriteAccess();
+    await expect(first).resolves.toBe(false);
+    answerWriteAccessExplainer(true);
+    answerWriteAccessExplainer(false);
+    await expect(second).resolves.toBe(true);
+    expect(useWriteAccessExplainerStore.getState().resolve).toBeNull();
   });
 });
 

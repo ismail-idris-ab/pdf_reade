@@ -133,6 +133,8 @@ export type DocumentCapabilities = {
   canDelete: boolean;
 };
 
+export type SharedWriteAccessResult = 'granted' | 'denied' | 'blocked';
+
 export type FileIndexEvents = {
   onScanBatch: (event: ScanBatchEvent) => void;
   onScanComplete: (event: ScanCompleteEvent) => void;
@@ -158,6 +160,21 @@ declare class FileIndexNativeModule extends NativeModule<FileIndexEvents> {
   listPersistedUris(): string[];
   /** Gives up the persisted permission for a URI. Never throws. */
   releasePersistedUri(uri: string): void;
+
+  // ── Shared-storage write access (apiVersion 5) ───────────────────────────
+  /**
+   * Whether file actions on shared storage (rename, move, copy, delete) are
+   * allowed right now: all-files access on Android 11+, the legacy
+   * WRITE_EXTERNAL_STORAGE runtime permission on Android 8–10.
+   */
+  hasSharedWriteAccess(): boolean;
+  /**
+   * Android 8–10: shows the system prompt for WRITE_EXTERNAL_STORAGE.
+   * 'blocked' = denied with "don't ask again" (only Settings can grant it).
+   * Android 11+: never prompts; resolves 'granted' or 'denied' from
+   * all-files access (the UI sends users to openAllFilesAccessSettings).
+   */
+  requestSharedWriteAccess(): Promise<SharedWriteAccessResult>;
 
   // ── File actions (apiVersion 4) ──────────────────────────────────────────
   // Paths must lie inside shared storage or the My Files root; anything else

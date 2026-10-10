@@ -1,10 +1,8 @@
 package com.ismailidris.pdfreader.fileindex
 
-import android.Manifest
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -15,7 +13,6 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.webkit.MimeTypeMap
-import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import expo.modules.kotlin.exception.CodedException
 import kotlinx.coroutines.CancellationException
@@ -379,17 +376,12 @@ class FileActions(private val context: Context) {
 
   /**
    * Shared storage is written directly, which needs all-files access on
-   * API 30+ and WRITE_EXTERNAL_STORAGE below. Fails early with
-   * PERMISSION_DENIED instead of half-way through an operation.
+   * API 30+ and WRITE_EXTERNAL_STORAGE below (see [SharedWriteAccess]).
+   * Fails early with PERMISSION_DENIED instead of half-way through an
+   * operation.
    */
   private fun requireSharedWriteAccess() {
-    val allowed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      Environment.isExternalStorageManager()
-    } else {
-      ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-        PackageManager.PERMISSION_GRANTED
-    }
-    if (!allowed) throw FileIndexException(ErrorCode.PERMISSION_DENIED, "No write access to shared storage")
+    if (!SharedWriteAccess.has(context)) throw FileIndexException(ErrorCode.PERMISSION_DENIED, "No write access to shared storage")
   }
 
   /** Tells the media store about changed shared-storage paths; best effort. */

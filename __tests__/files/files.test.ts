@@ -24,6 +24,7 @@ import {
   keepExtension,
   splitExtension,
   hasAllFilesAccess,
+  hasSharedWriteAccess,
   importDocuments,
   isInMyFiles,
   listFolder,
@@ -34,6 +35,7 @@ import {
   renameDocument,
   renameFile,
   renameFolder,
+  requestSharedWriteAccess,
   share,
   stat,
   toNewFile,
@@ -173,9 +175,34 @@ describe('toNewFile', () => {
 
 describe('native wrappers', () => {
   it('reads the api version and all-files access', () => {
-    expect(getFileIndexApiVersion()).toBe(4);
+    expect(getFileIndexApiVersion()).toBe(5);
     native.hasAllFilesAccess.mockReturnValueOnce(false);
     expect(hasAllFilesAccess()).toBe(false);
+  });
+
+  it('reads and requests shared-storage write access (apiVersion 5)', async () => {
+    native.resetFs();
+    native.setSharedWriteAccess(false);
+    expect(hasSharedWriteAccess()).toBe(false);
+    native.setSharedWriteRequestOutcome('blocked');
+    await expect(requestSharedWriteAccess()).resolves.toBe('blocked');
+    expect(hasSharedWriteAccess()).toBe(false);
+    native.setSharedWriteRequestOutcome('granted');
+    await expect(requestSharedWriteAccess()).resolves.toBe('granted');
+    expect(hasSharedWriteAccess()).toBe(true);
+    expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(2);
+  });
+
+  it('normalises shared-write access failures to AppErrors', async () => {
+    native.hasSharedWriteAccess.mockImplementationOnce(() => {
+      throw nativeError('UNSUPPORTED');
+    });
+    expect(() => hasSharedWriteAccess()).toThrow(AppError);
+    native.requestSharedWriteAccess.mockRejectedValueOnce(nativeError('PERMISSION_DENIED'));
+    await expect(requestSharedWriteAccess()).rejects.toMatchObject({
+      name: 'AppError',
+      code: 'PERMISSION_DENIED',
+    });
   });
 
   it('normalises a synchronous hasAllFilesAccess failure', () => {

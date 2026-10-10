@@ -1,4 +1,50 @@
+import type { AndroidConfig } from 'expo/config-plugins';
+
 import config from '../app.config';
+
+const WRITE_EXTERNAL_STORAGE = 'android.permission.WRITE_EXTERNAL_STORAGE';
+
+type AndroidManifest = AndroidConfig.Manifest.AndroidManifest;
+
+/** A <uses-permission> entry, with the attributes this config sets on it. */
+type UsesPermission = {
+  $: AndroidConfig.Manifest.ManifestUsesPermission['$'] & {
+    'android:maxSdkVersion'?: string;
+    'tools:replace'?: string;
+  };
+};
+
+/** `mods` is added by the manifest plugin, so it is not on ExpoConfig itself. */
+type ManifestMod = (mod: {
+  modResults: AndroidManifest;
+}) => Promise<{ modResults: AndroidManifest }>;
+type ConfigMods = { android?: { manifest?: ManifestMod } };
+
+/**
+ * Runs the config's own android manifest mod over `permissions`, the way
+ * prebuild does, and returns the resulting <uses-permission> entries.
+ */
+async function applyManifestMod(permissions: UsesPermission[]): Promise<UsesPermission[]> {
+  const manifest: AndroidManifest = {
+    manifest: {
+      $: { 'xmlns:android': 'http://schemas.android.com/apk/res/android' },
+      queries: [],
+      'uses-permission': permissions,
+    },
+  };
+  const mods = (config as typeof config & { mods?: ConfigMods }).mods;
+  const mod = mods?.android?.manifest;
+  if (!mod) throw new Error('the android manifest mod is not configured');
+  const { modResults: applied } = await mod({ modResults: manifest });
+  expect(applied.manifest.$['xmlns:tools']).toBe('http://schemas.android.com/tools');
+  return applied.manifest['uses-permission'] ?? [];
+}
+
+const entry = (name: string, maxSdkVersion?: string): UsesPermission => ({
+  $: maxSdkVersion
+    ? { 'android:name': name, 'android:maxSdkVersion': maxSdkVersion }
+    : { 'android:name': name },
+});
 
 type BuildPropertiesPlugin = [
   'expo-build-properties',
@@ -25,14 +71,51 @@ describe('app config', () => {
     expect(config.name).toBe('Pdf Reader');
   });
 
-  it('blocks the legacy shared-storage write permission', () => {
-    expect(config.android?.blockedPermissions).toContain(
-      'android.permission.WRITE_EXTERNAL_STORAGE',
-    );
+  it('no longer blocks the legacy shared-storage write permission', () => {
+    // File actions on shared storage need it on Android 8-10; the manifest
+    // mod below caps it at API 29 so Android 11+ never sees it.
+    expect(config.android?.blockedPermissions ?? []).not.toContain(WRITE_EXTERNAL_STORAGE);
   });
 
   it('targets Android only', () => {
     expect(config.platforms).toEqual(['android']);
+  });
+});
+
+describe('legacy write permission manifest mod', () => {
+  it('pins the permission to Android 10 and marks it as replacing library values', async () => {
+    const permissions = await applyManifestMod([entry(WRITE_EXTERNAL_STORAGE, '32')]);
+    expect(permissions).toEqual([
+      {
+        $: {
+          'android:name': WRITE_EXTERNAL_STORAGE,
+          'android:maxSdkVersion': '29',
+          'tools:replace': 'android:maxSdkVersion',
+        },
+      },
+    ]);
+  });
+
+  it('leaves exactly one entry when the template declared it more than once', async () => {
+    const permissions = await applyManifestMod([
+      entry(WRITE_EXTERNAL_STORAGE, '32'),
+      entry(WRITE_EXTERNAL_STORAGE),
+    ]);
+    expect(
+      permissions.filter((item) => item.$['android:name'] === WRITE_EXTERNAL_STORAGE),
+    ).toHaveLength(1);
+  });
+
+  it('adds the entry when the template declared none', async () => {
+    const permissions = await applyManifestMod([]);
+    expect(permissions.map((item) => item.$['android:name'])).toEqual([WRITE_EXTERNAL_STORAGE]);
+  });
+
+  it('keeps every other permission untouched', async () => {
+    const read = entry('android.permission.READ_EXTERNAL_STORAGE', '32');
+    const internet = entry('android.permission.INTERNET');
+    const permissions = await applyManifestMod([read, internet, entry(WRITE_EXTERNAL_STORAGE)]);
+    expect(permissions.slice(0, 2)).toEqual([read, internet]);
   });
 
   it('pins the SDK levels required by the spec and Play policy', () => {

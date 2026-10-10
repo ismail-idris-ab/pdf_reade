@@ -1,6 +1,35 @@
 import type { ExpoConfig } from 'expo/config';
+import { AndroidConfig, withAndroidManifest, type ConfigPlugin } from 'expo/config-plugins';
 
 const ANDROID_PACKAGE = 'com.ismailidris.pdfreader';
+
+const WRITE_EXTERNAL_STORAGE = 'android.permission.WRITE_EXTERNAL_STORAGE';
+
+type UsesPermissionAttributes = AndroidConfig.Manifest.ManifestUsesPermission['$'] & {
+  'android:maxSdkVersion': string;
+  'tools:replace': string;
+};
+
+// File actions on shared storage use legacy WRITE_EXTERNAL_STORAGE on Android
+// 8-10 only (all-files access from Android 11). Expo's template declares it
+// with maxSdkVersion 32 and tools:replace, which outranks every library
+// manifest, so the app manifest entry itself is pinned to maxSdkVersion 29.
+const withLegacyWriteStorageMaxSdk: ConfigPlugin = (expoConfig) =>
+  withAndroidManifest(expoConfig, (mod) => {
+    const androidManifest = AndroidConfig.Manifest.ensureToolsAvailable(mod.modResults);
+    const manifest = androidManifest.manifest;
+    const others = (manifest['uses-permission'] ?? []).filter(
+      (permission) => permission.$['android:name'] !== WRITE_EXTERNAL_STORAGE,
+    );
+    const writeStorage: UsesPermissionAttributes = {
+      'android:name': WRITE_EXTERNAL_STORAGE,
+      'android:maxSdkVersion': '29',
+      'tools:replace': 'android:maxSdkVersion',
+    };
+    manifest['uses-permission'] = [...others, { $: writeStorage }];
+    mod.modResults = androidManifest;
+    return mod;
+  });
 
 // Sentry's config plugin only uploads source maps and debug symbols. It is
 // added when an auth token is present (EAS release builds with the secret
@@ -42,9 +71,9 @@ const config: ExpoConfig = {
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
-    // Expo's template adds legacy WRITE_EXTERNAL_STORAGE; the app never writes
-    // to shared storage that way (imports and shares go through the cache).
-    blockedPermissions: ['android.permission.WRITE_EXTERNAL_STORAGE'],
+    // WRITE_EXTERNAL_STORAGE is not blocked: file actions on shared storage
+    // need it on Android 8-10. The file-index module declares it with
+    // maxSdkVersion 29 (Android 11+ uses all-files access instead).
   },
   plugins: [
     'expo-router',
@@ -91,4 +120,4 @@ const config: ExpoConfig = {
   },
 };
 
-export default config;
+export default withLegacyWriteStorageMaxSdk(config);

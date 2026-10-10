@@ -3,6 +3,7 @@ import Storage from 'expo-sqlite/kv-store';
 import {
   AppState,
   BackHandler,
+  Linking,
   Platform,
   StyleSheet,
   type StyleProp,
@@ -16,6 +17,7 @@ import { FAKE_MY_FILES_ROOT, type FakeFileIndexModule } from './fakeFileIndex';
 import { ToastHost, useToastStore } from '@/components/ui';
 import { getRepositories } from '@/db/client';
 import type { NewFile } from '@/db/types';
+import { useWriteAccessExplainerStore } from '@/features/files/sharedWriteAccess';
 import { useFileActionsStore, useMyFilesStore } from '@/features/files/store';
 import { LibraryScreen } from '@/features/library/LibraryScreen';
 import { useLibraryPrefsStore } from '@/features/library/store';
@@ -132,6 +134,7 @@ beforeEach(() => {
   useAllFilesAccessStore.setState({ granted: null });
   useToastStore.setState({ current: null });
   useFileActionsStore.setState({ target: null, overlay: null });
+  useWriteAccessExplainerStore.setState({ resolve: null });
   useMyFilesStore.setState({ dir: null });
   native.resetFs();
   native.hasAllFilesAccess.mockImplementation(() => true);
@@ -186,13 +189,32 @@ describe('actions sheet', () => {
     expect(sheetActions()).toEqual(['Add to favorites', 'Details', 'Share', 'Print']);
   });
 
-  it('hides them on Android 10 and below even with access', async () => {
-    jest.spyOn(Platform, 'Version', 'get').mockReturnValue(29);
-    const pdf = seedFile(`${DL}/report.pdf`);
-    await renderLibrary();
-    await openActions(pdf.id);
-    expect(sheetActions()).toEqual(['Add to favorites', 'Details', 'Share', 'Print']);
-  });
+  it.each([
+    ['with', true],
+    ['without', false],
+  ])(
+    'shows them on Android 10 and below %s all-files access (asked on first use)',
+    async (_label, access) => {
+      jest.spyOn(Platform, 'Version', 'get').mockReturnValue(29);
+      native.hasAllFilesAccess.mockImplementation(() => access);
+      native.setSharedWriteAccess(false);
+      const pdf = seedFile(`${DL}/report.pdf`);
+      await renderLibrary();
+      await openActions(pdf.id);
+      expect(sheetActions()).toEqual([
+        'Add to favorites',
+        'Rename',
+        'Move',
+        'Duplicate',
+        'Details',
+        'Share',
+        'Print',
+        'Delete',
+      ]);
+      // Opening the sheet asks for nothing.
+      expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+    },
+  );
 
   it('for picked documents: Copy to My Files, no Duplicate, rename/delete as the provider allows', async () => {
     native.documentCapabilities.mockImplementation(async () => ({
@@ -944,5 +966,204 @@ describe('picked documents deleted outside the app', () => {
     expect(native.deleteDocument).toHaveBeenCalledWith('content://p/gone');
     expect(getRepositories().files.getById(picked.id)).toBeUndefined();
     expect(native.releasePersistedUri).toHaveBeenCalledWith('content://p/gone');
+  });
+});
+
+describe('storage permission on Android 8–10', () => {
+  const DENIED = 'Storage permission is needed to change files on your phone.';
+  const BLOCKED =
+    'Storage permission is turned off. Allow it in Settings to change files on your phone.';
+  const explainer = () => screen.queryByTestId('write-access-dialog', H);
+
+  beforeEach(() => {
+    jest.spyOn(Platform, 'Version', 'get').mockReturnValue(29);
+    native.hasAllFilesAccess.mockImplementation(() => false);
+    native.setSharedWriteAccess(false);
+    // Duplicate copies into the file's own folder.
+    native.addFolder(DL);
+  });
+
+  it('explains, asks, and opens the action once granted', async () => {
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Rename');
+
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    const dialog = within(screen.getByTestId('write-access-dialog', H));
+    expect(dialog.getByRole('header', { name: 'Allow storage access', ...H })).toBeTruthy();
+    expect(
+      dialog.getByText(
+        'To change files on your phone, the app needs storage permission. Android will ask you next.',
+        H,
+      ),
+    ).toBeTruthy();
+    // The actions sheet is closed behind the explanation.
+    expect(screen.queryByTestId('file-actions-sheet', H)).toBeNull();
+    expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() => expect(screen.getByTestId('rename-dialog', H)).toBeTruthy());
+    expect(explainer()).toBeNull();
+    expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(1);
+
+    await fireEvent.changeText(screen.getByTestId('rename-dialog-input', H), 'fresh.pdf');
+    await fireEvent.press(screen.getByTestId('rename-dialog-confirm', H));
+    await waitFor(() => expect(toastText()).toBe('Renamed'));
+    expect(getRepositories().files.getById(pdf.id)?.path).toBe(`${DL}/fresh.pdf`);
+
+    // Granted now: the next write action asks nothing.
+    await openActions(pdf.id);
+    await choose('Delete');
+    await waitFor(() => expect(screen.getByTestId('delete-dialog', H)).toBeTruthy());
+    expect(explainer()).toBeNull();
+    expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs straight away when the permission is already held', async () => {
+    native.setSharedWriteAccess(true);
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Duplicate');
+    await waitFor(() => expect(toastText()).toBe('Copy created'));
+    expect(native.copyFile).toHaveBeenCalledTimes(1);
+    expect(explainer()).toBeNull();
+    expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+  });
+
+  it('cancelling the explanation asks nothing and changes nothing', async () => {
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Move');
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-cancel', H));
+    await waitFor(() => expect(explainer()).toBeNull());
+    expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('folder-picker', H)).toBeNull();
+    expect(useFileActionsStore.getState().overlay).toBeNull();
+  });
+
+  it('denied: explains with "Try again", which asks again and then runs the action', async () => {
+    native.setSharedWriteRequestOutcome('denied');
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Duplicate');
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() => expect(toastText()).toBe(DENIED));
+    expect(native.copyFile).not.toHaveBeenCalled();
+
+    native.setSharedWriteRequestOutcome('granted');
+    await fireEvent.press(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() => expect(toastText()).toBe('Copy created'));
+    expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(2);
+    expect(native.copyFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocked: offers Open Settings (the app settings page)', async () => {
+    const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    native.setSharedWriteRequestOutcome('blocked');
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Delete');
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() => expect(toastText()).toBe(BLOCKED));
+    expect(screen.queryByTestId('delete-dialog', H)).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Open Settings' }));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(native.openAllFilesAccessSettings).not.toHaveBeenCalled();
+    expect(native.deleteFile).not.toHaveBeenCalled();
+  });
+
+  it('a failing system prompt shows an error with "Try again"', async () => {
+    native.requestSharedWriteAccess.mockRejectedValueOnce(
+      Object.assign(new Error('no activity'), { code: 'UNKNOWN' }),
+    );
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Rename');
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeOnTheScreen(),
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() => expect(screen.getByTestId('rename-dialog', H)).toBeTruthy());
+  });
+
+  it('ignores a double tap: one explanation, one prompt', async () => {
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    const rename = sheet().getByRole('button', { name: 'Rename', ...H });
+    // Two taps on the same button: the second reaches the handler while the
+    // gate from the first is still open, so the guard has to drop it. The
+    // presses are awaited one after the other because concurrent fireEvent
+    // calls overlap React's act() scopes, which corrupts later renders.
+    await fireEvent.press(rename);
+    await fireEvent.press(rename);
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() => expect(screen.getByTestId('rename-dialog', H)).toBeTruthy());
+    expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(1);
+    // The guard is free again once the gate has finished.
+    expect(native.hasSharedWriteAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('PERMISSION_DENIED after the permission was revoked: same explanation and "Try again"', async () => {
+    native.setSharedWriteAccess(true);
+    const pdf = seedFile(`${DL}/report.pdf`);
+    native.deleteFile.mockImplementationOnce(async () => {
+      // Revoked in Settings while the app was running.
+      native.setSharedWriteAccess(false);
+      throw Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' });
+    });
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Delete');
+    await fireEvent.press(screen.getByTestId('delete-confirm', H));
+    await waitFor(() => expect(toastText()).toBe(DENIED));
+    expect(native.openAllFilesAccessSettings).not.toHaveBeenCalled();
+    expect(getRepositories().files.getById(pdf.id)).toBeDefined();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(explainer()).not.toBeNull());
+    await fireEvent.press(screen.getByTestId('write-access-continue', H));
+    await waitFor(() => expect(screen.getByTestId('delete-dialog', H)).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('delete-confirm', H));
+    await waitFor(() => expect(toastText()).toBe('Deleted'));
+    expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('storage permission on Android 11+', () => {
+  it('never asks for the legacy permission: write actions open directly', async () => {
+    native.addFolder(DL);
+    const pdf = seedFile(`${DL}/report.pdf`);
+    await renderLibrary();
+    await openActions(pdf.id);
+    await choose('Rename');
+    await waitFor(() => expect(screen.getByTestId('rename-dialog', H)).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('rename-dialog-cancel', H));
+    await openActions(pdf.id);
+    await choose('Delete');
+    await waitFor(() => expect(screen.getByTestId('delete-dialog', H)).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('delete-cancel', H));
+    await openActions(pdf.id);
+    await choose('Duplicate');
+    await waitFor(() => expect(toastText()).toBe('Copy created'));
+    expect(screen.queryByTestId('write-access-dialog', H)).toBeNull();
+    expect(native.requestSharedWriteAccess).not.toHaveBeenCalled();
+    expect(native.hasSharedWriteAccess).not.toHaveBeenCalled();
   });
 });

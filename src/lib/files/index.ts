@@ -3,10 +3,11 @@ import FileIndexModule, {
   type FileStat,
   type PickedDocument,
   type ScannedFile,
+  type SharedWriteAccessResult,
 } from '../../../modules/file-index/src/FileIndexModule';
 import { toAppError } from '@/lib/errors';
 
-export type { CachedContent, FileStat, PickedDocument, ScannedFile };
+export type { CachedContent, FileStat, PickedDocument, ScannedFile, SharedWriteAccessResult };
 export {
   useAllFilesAccess,
   useAllFilesAccessStore,
@@ -96,6 +97,33 @@ export function hasAllFilesAccess(): boolean {
 export async function openAllFilesAccessSettings(): Promise<void> {
   try {
     await FileIndexModule.openAllFilesAccessSettings();
+  } catch (error) {
+    throw toAppError(error);
+  }
+}
+
+/**
+ * Whether file actions on shared storage (rename, move, copy, delete) are
+ * allowed right now: all-files access on Android 11+, the legacy
+ * WRITE_EXTERNAL_STORAGE permission on Android 8–10.
+ */
+export function hasSharedWriteAccess(): boolean {
+  try {
+    return FileIndexModule.hasSharedWriteAccess();
+  } catch (error) {
+    throw toAppError(error);
+  }
+}
+
+/**
+ * Android 8–10: shows the system prompt for the legacy storage write
+ * permission. 'blocked' means it was denied with "don't ask again", so only
+ * the app's Settings page can grant it. Android 11+ never prompts: it answers
+ * from all-files access ('granted' or 'denied').
+ */
+export async function requestSharedWriteAccess(): Promise<SharedWriteAccessResult> {
+  try {
+    return await FileIndexModule.requestSharedWriteAccess();
   } catch (error) {
     throw toAppError(error);
   }

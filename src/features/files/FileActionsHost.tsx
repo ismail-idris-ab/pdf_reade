@@ -36,7 +36,13 @@ import { FileActionsSheet, FolderActionsSheet, type FileAction } from './compone
 import { DetailsSheet } from './components/DetailsSheet';
 import { FolderPicker } from './components/FolderPicker';
 import { NameDialog } from './components/NameDialog';
+import { WriteAccessDialog } from './components/WriteAccessDialog';
 import { showFileActionError, showRenameNotKept } from './errors';
+import {
+  ensureSharedWriteAccess,
+  explainSharedWriteAccess,
+  showSharedWriteRefused,
+} from './sharedWriteAccess';
 import {
   closeFileActions,
   openFileActions,
@@ -57,13 +63,24 @@ const noop = () => undefined;
 export function FileActionsHost() {
   const target = useFileActionsStore((state) => state.target);
   const overlay = useFileActionsStore((state) => state.overlay);
-  if (target === null) return null;
-  return target.kind === 'file' ? (
-    <FileOverlays key={`file-${target.file.id}`} file={target.file} overlay={overlay} />
-  ) : (
-    <FolderOverlays key={`folder-${target.folder.path}`} folder={target.folder} overlay={overlay} />
+  return (
+    <>
+      {target === null ? null : target.kind === 'file' ? (
+        <FileOverlays key={`file-${target.file.id}`} file={target.file} overlay={overlay} />
+      ) : (
+        <FolderOverlays
+          key={`folder-${target.folder.path}`}
+          folder={target.folder}
+          overlay={overlay}
+        />
+      )}
+      <WriteAccessDialog />
+    </>
   );
 }
+
+/** File actions that change a file in place, so they need shared-storage write access. */
+type WriteAction = 'rename' | 'move' | 'duplicate' | 'delete';
 
 function folderLabel(dir: string, rootName: string): string {
   const root = tryGetMyFilesRoot();
@@ -82,12 +99,6 @@ function FileOverlays({ file, overlay }: { file: LibraryFile; overlay: ActionOve
       () => toast(t('fileActions.removedFromLibrary')),
       (error: unknown) => showErrorToast(error),
     );
-  };
-
-  // Re-opens an overlay for this same file (the retry of a failed dialog).
-  const reopen = (next: ActionOverlay) => () => {
-    openFileActions({ kind: 'file', file });
-    showActionOverlay(next);
   };
 
   const fail = (error: unknown, onRetry?: () => void) => {
@@ -123,10 +134,55 @@ function FileOverlays({ file, overlay }: { file: LibraryFile; overlay: ActionOve
   };
 
   const duplicate = () =>
-    perform(async () => {
-      await duplicateLibraryFile(repos, file.id);
-      return t('fileActions.duplicated');
-    }, duplicate);
+    perform(
+      async () => {
+        await duplicateLibraryFile(repos, file.id);
+        return t('fileActions.duplicated');
+      },
+      () => beginWrite('duplicate'),
+    );
+
+  // Starts a write action for this file: Duplicate runs, the others open
+  // their dialog. It closes over this render's `file`, so a toast's "Try
+  // again" keeps acting on the file the toast was about, which is what we
+  // want; it reopens the sheet through the store rather than assuming one is
+  // still on screen.
+  const openWrite = (action: WriteAction) => {
+    if (action === 'duplicate') {
+      duplicate();
+      return;
+    }
+    openFileActions({ kind: 'file', file });
+    showActionOverlay(action);
+  };
+
+  // Write actions on shared storage pass the permission gate first (Android
+  // 8–10: explanation, then the system prompt; a no-op otherwise). The gate
+  // finishes before the operation is queued, and a double tap while it is
+  // open is ignored. Retries of failed write actions come back through here.
+  const beginWrite = (action: WriteAction) => {
+    if (!sharedStorage) {
+      openWrite(action);
+      return;
+    }
+    const explain = () => {
+      closeFileActions();
+      return explainSharedWriteAccess();
+    };
+    const retry = () => beginWrite(action);
+    void run(() => ensureSharedWriteAccess(explain)).then(
+      (outcome) => {
+        // undefined: a double tap while the gate was already open.
+        if (outcome === undefined || outcome === 'cancelled') return;
+        if (outcome === 'granted') openWrite(action);
+        else showSharedWriteRefused(outcome, retry);
+      },
+      (error: unknown) => {
+        closeFileActions();
+        showErrorToast(error, { onRetry: retry });
+      },
+    );
+  };
   const shareFile = () =>
     perform(async () => {
       await shareLibraryFile(repos, file.id);
@@ -150,20 +206,17 @@ function FileOverlays({ file, overlay }: { file: LibraryFile; overlay: ActionOve
         }
         return;
       case 'rename':
-        showActionOverlay('rename');
-        return;
       case 'move':
+      case 'delete':
+      case 'duplicate':
+        beginWrite(action);
+        return;
       case 'copyToMyFiles':
+        // Picked documents: copied into My Files, nothing in shared storage changes.
         showActionOverlay('move');
         return;
       case 'details':
         showActionOverlay('details');
-        return;
-      case 'delete':
-        showActionOverlay('delete');
-        return;
-      case 'duplicate':
-        duplicate();
         return;
       case 'share':
         shareFile();
@@ -182,14 +235,14 @@ function FileOverlays({ file, overlay }: { file: LibraryFile; overlay: ActionOve
         toast(t('fileActions.deleted'));
       } catch (error) {
         closeFileActions();
-        fail(error, reopen('delete'));
+        fail(error, () => beginWrite('delete'));
       }
     });
   };
 
-  const closeAfterError = (retry: ActionOverlay) => (error: unknown) => {
+  const closeAfterError = (retry: WriteAction) => (error: unknown) => {
     closeFileActions();
-    fail(error, reopen(retry));
+    fail(error, () => beginWrite(retry));
   };
 
   return (

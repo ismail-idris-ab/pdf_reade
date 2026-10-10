@@ -50,7 +50,8 @@ import { bumpLibraryVersion } from '@/lib/library/version';
 // file's old location once the file is renamed or moved, so it is dropped
 // and its grant released (unless another row still uses it); path rows
 // renamed or moved by the app are only reachable by path afterwards, which
-// these shared-storage operations need anyway (all-files access). Imported
+// these shared-storage operations need anyway (all-files access; on Android
+// 8–10 the storage permissions). Imported
 // copies live in My Files and are stored by path; imports pick without
 // persisting grants, and any grant the picker did persist is released.
 //
@@ -58,21 +59,34 @@ import { bumpLibraryVersion } from '@/lib/library/version';
 // (exclusive), together with reconcileMyFiles and mergePickedDuplicates, so
 // none of them sees another half-applied.
 
-/** First Android API level (11) where all-files access lets the app change shared storage. */
+/**
+ * First Android API level (11) where shared-storage writes need all-files
+ * access; below it they need the legacy storage write permission.
+ */
 export const MIN_SHARED_WRITE_API = 30;
 
 /**
- * Whether the app may rename, move, copy or delete files in shared storage:
- * only on Android 11+ with all-files access. On Android 8–10 the native side
- * always refuses (WRITE_EXTERNAL_STORAGE is blocked in the manifest), so
- * those actions are hidden rather than left to fail. My Files and picked
+ * Whether shared-storage writes use the legacy runtime permission (Android
+ * 8–10), which the app asks for on first use (see ensureSharedWriteAccess).
+ * False on Android 11+ and on anything that is not Android.
+ */
+export function usesLegacyWritePermission(apiLevel: number | string = Platform.Version): boolean {
+  return typeof apiLevel === 'number' && apiLevel < MIN_SHARED_WRITE_API;
+}
+
+/**
+ * Whether to offer rename, move, copy and delete for files in shared
+ * storage. Android 11+: only with all-files access (otherwise hidden, the
+ * access banner explains). Android 8–10: always; the first such action
+ * explains and asks for the legacy write permission. My Files and picked
  * documents are unaffected.
  */
 export function canChangeSharedStorage(
   hasAllFilesAccess: boolean,
   apiLevel: number | string = Platform.Version,
 ): boolean {
-  return typeof apiLevel === 'number' && apiLevel >= MIN_SHARED_WRITE_API && hasAllFilesAccess;
+  if (typeof apiLevel !== 'number') return false;
+  return apiLevel < MIN_SHARED_WRITE_API || hasAllFilesAccess;
 }
 
 /** True for Storage Access Framework URIs (picked rows). */

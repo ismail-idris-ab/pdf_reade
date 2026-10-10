@@ -1,7 +1,6 @@
 package com.ismailidris.pdfreader.fileindex
 
 import android.content.Context
-import android.os.Build
 import android.os.Environment
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
@@ -209,8 +208,8 @@ class FileActionsTest {
   }
 
   @Test
-  fun sharedStorageNeedsAllFilesAccess() {
-    assumeFalse(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+  fun sharedStorageNeedsWriteAccess() {
+    assumeFalse(SharedWriteAccess.has(context))
     @Suppress("DEPRECATION")
     val shared = File(Environment.getExternalStorageDirectory(), "Download/never-created.pdf")
     expectCode(ErrorCode.PERMISSION_DENIED.name) { actions.deleteFile(shared.path) }

@@ -170,6 +170,14 @@ export const fr: Catalog = {
     removedFromLibrary: 'Retiré de la bibliothèque',
     allowAccessToChange:
       'Autorisez l’accès à tous les fichiers pour que l’application puisse modifier les fichiers de votre téléphone.',
+    writeAccessTitle: 'Autoriser l’accès au stockage',
+    writeAccessMessage:
+      'Pour modifier les fichiers de votre téléphone, l’application a besoin de l’autorisation de stockage. Android va vous la demander.',
+    writeAccessContinue: 'Continuer',
+    writeAccessDenied:
+      'L’autorisation de stockage est nécessaire pour modifier les fichiers de votre téléphone.',
+    writeAccessBlocked:
+      'L’autorisation de stockage est désactivée. Autorisez-la dans les Paramètres pour modifier les fichiers de votre téléphone.',
     moveTitle: 'Déplacer vers',
     copyTitle: 'Copier dans Mes fichiers',
     moveHere: 'Déplacer ici',

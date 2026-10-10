@@ -133,6 +133,11 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `fileActions.removeFromLibrary` | Remove from library | Cire daga ɗakin karatu | Retirer de la bibliothèque | T1.4 |
 | `fileActions.removedFromLibrary` | Removed from library | An cire daga ɗakin karatu | Retiré de la bibliothèque | T1.4 |
 | `fileActions.allowAccessToChange` | Allow all-files access so the app can change files on your phone. | Ba da izinin shiga duk fayiloli domin manhajar ta iya canza fayiloli a wayarka. | Autorisez l’accès à tous les fichiers pour que l’application puisse modifier les fichiers de votre téléphone. | T1.4 |
+| `fileActions.writeAccessTitle` | Allow storage access | Ba da izinin ma’ajiya | Autoriser l’accès au stockage | T1.4b |
+| `fileActions.writeAccessMessage` | To change files on your phone, the app needs storage permission. Android will ask you next. | Domin canza fayiloli a wayarka, manhajar tana buƙatar izinin ma’ajiya. Android za ta tambaye ka a gaba. | Pour modifier les fichiers de votre téléphone, l’application a besoin de l’autorisation de stockage. Android va vous la demander. | T1.4b |
+| `fileActions.writeAccessContinue` | Continue | Ci gaba | Continuer | T1.4b |
+| `fileActions.writeAccessDenied` | Storage permission is needed to change files on your phone. | Ana buƙatar izinin ma’ajiya domin canza fayiloli a wayarka. | L’autorisation de stockage est nécessaire pour modifier les fichiers de votre téléphone. | T1.4b |
+| `fileActions.writeAccessBlocked` | Storage permission is turned off. Allow it in Settings to change files on your phone. | An kashe izinin ma’ajiya. Ka ba da shi a Saituna domin canza fayiloli a wayarka. | L’autorisation de stockage est désactivée. Autorisez-la dans les Paramètres pour modifier les fichiers de votre téléphone. | T1.4b |
 | `fileActions.moveTitle` | Move to | Matsar zuwa | Déplacer vers | T1.4 |
 | `fileActions.copyTitle` | Copy to My Files | Kwafa zuwa Fayilolina | Copier dans Mes fichiers | T1.4 |
 | `fileActions.moveHere` | Move here | Matsar nan | Déplacer ici | T1.4 |

@@ -108,6 +108,10 @@ class FileIndexModule : Module() {
   private val pendingPick = PendingSlot<PendingPick>()
   private val pickSequence = AtomicInteger(0)
 
+  // The outstanding requestSharedWriteAccess promise, held the same way: the
+  // permission listener and OnDestroy race for it, and only one can settle it.
+  private val pendingWriteAccess = PendingSlot<OneShotPromise>()
+
   private val context: Context
     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
 
@@ -140,6 +144,9 @@ class FileIndexModule : Module() {
     OnDestroy {
       scanCancelFlags.values.forEach { it.set(true) }
       pendingPick.take()?.promise?.reject(moduleDestroyed())
+      // A storage-access dialog may still be showing; its listener will find
+      // the promise already settled and do nothing.
+      pendingWriteAccess.take()?.settle { it.reject(moduleDestroyed()) }
       scope.cancel()
     }
 
@@ -150,6 +157,18 @@ class FileIndexModule : Module() {
     AsyncFunction("openAllFilesAccessSettings") { promise: Promise ->
       openAllFilesAccessSettings(promise)
     }
+
+    // region shared-storage write access (apiVersion 5)
+
+    Function("hasSharedWriteAccess") {
+      SharedWriteAccess.has(context)
+    }
+
+    AsyncFunction("requestSharedWriteAccess") { promise: Promise ->
+      requestSharedWriteAccess(promise)
+    }
+
+    // endregion
 
     AsyncFunction("startScan") { options: ScanOptions ->
       startScan(options)
@@ -346,6 +365,83 @@ class FileIndexModule : Module() {
     } catch (e: Throwable) {
       if (e is CancellationException) throw e
       promise.reject(CodedException(ERR_SETTINGS_FAILED, "Could not request storage access", null))
+    }
+  }
+
+  /**
+   * API 30+: resolves from all-files access without prompting. API 26-29:
+   * resolves "granted" when WRITE_EXTERNAL_STORAGE is held, otherwise shows
+   * the system dialog through the Expo permissions service (READ is asked
+   * along when missing; same group, one dialog) and maps the answer with
+   * [SharedWriteAccess.resultAfterPrompt]. Rejects ERR_NO_ACTIVITY when no
+   * screen can host the dialog.
+   */
+  private fun requestSharedWriteAccess(promise: Promise) {
+    if (!scope.isActive) {
+      promise.reject(moduleDestroyed())
+      return
+    }
+    val sdk = Build.VERSION.SDK_INT
+    val allowed = SharedWriteAccess.has(context)
+    if (!SharedWriteAccess.needsPrompt(sdk, allowed)) {
+      promise.resolve(SharedWriteAccess.resultWithoutPrompt(allowed))
+      return
+    }
+    val permissions = appContext.permissions
+    if (permissions == null) {
+      promise.reject(CodedException(ERR_SETTINGS_FAILED, "Could not request storage access", null))
+      return
+    }
+    val toRequest = SharedWriteAccess.permissionsToRequest(
+      readGranted = SharedWriteAccess.isGranted(context, Manifest.permission.READ_EXTERNAL_STORAGE),
+    )
+    // The answer arrives in a listener, after the coroutine body has already
+    // returned, so the promise is held in a module-level slot: it is settled
+    // by whichever side gets there first, the listener or OnDestroy. Without
+    // the slot, a dialog still showing when the module goes away would leave
+    // the promise hanging forever.
+    val request = OneShotPromise(promise)
+    // A newer call replaces a pending one, so an answer the system never
+    // delivered cannot block storage access until restart.
+    pendingWriteAccess.replace(request)?.settle {
+      it.reject(FileIndexException(ErrorCode.CANCELLED, "Replaced by a newer storage access request"))
+    }
+    // OnDestroy may have run between the first check and the claim above.
+    if (!scope.isActive) {
+      pendingWriteAccess.release(request)
+      request.settle { it.reject(moduleDestroyed()) }
+      return
+    }
+    /** Settles this request, unless the listener or OnDestroy already did. */
+    fun settle(block: (Promise) -> Unit) {
+      pendingWriteAccess.release(request)
+      request.settle(block)
+    }
+    // The dialog is requested from the main thread; the listener runs once
+    // the user has answered.
+    val job = scope.launch(Dispatchers.Main) {
+      try {
+        if (appContext.currentActivity == null) {
+          settle { it.reject(CodedException(ERR_NO_ACTIVITY, "No screen is available to ask for storage access", null)) }
+          return@launch
+        }
+        permissions.askForPermissions({ result ->
+          val response = result[Manifest.permission.WRITE_EXTERNAL_STORAGE]
+          val granted = response?.status == PermissionsStatus.GRANTED || SharedWriteAccess.has(context)
+          settle {
+            it.resolve(SharedWriteAccess.resultAfterPrompt(granted, canAskAgain = response?.canAskAgain ?: true))
+          }
+        }, *toRequest.toTypedArray())
+      } catch (e: CancellationException) {
+        throw e
+      } catch (_: Throwable) {
+        settle { it.reject(CodedException(ERR_SETTINGS_FAILED, "Could not request storage access", null)) }
+      }
+    }
+    // Only a cancelled job settles here: a job that ran to completion has
+    // merely shown the dialog, and its listener is still to come.
+    job.invokeOnCompletion { cause ->
+      if (cause != null) settle { it.reject(moduleDestroyed()) }
     }
   }
 
@@ -973,7 +1069,7 @@ class FileIndexModule : Module() {
   // endregion
 
   companion object {
-    const val API_VERSION = 4
+    const val API_VERSION = 5
 
     private const val TAG = "FileIndex"
 
