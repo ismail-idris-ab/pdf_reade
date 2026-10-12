@@ -5,6 +5,7 @@ export const fr: Catalog = {
   common: {
     cancel: 'Annuler',
     close: 'Fermer',
+    back: 'Retour',
     errorToast: '{{title}}. {{message}}',
   },
   errors: {
@@ -241,5 +242,18 @@ export const fr: Catalog = {
     imageToPdfCount_other: '{{count}} images prêtes à devenir un PDF',
     imageToPdfComingSoon: 'La conversion en PDF arrive bientôt.',
     imageToPdfEmpty: 'Aucune image n’a été reçue.',
+  },
+  settings: {
+    title: 'Paramètres',
+    appearance: 'Apparence',
+    theme: 'Thème',
+    themeOptions: {
+      system: 'Utiliser le réglage du téléphone',
+      light: 'Clair',
+      dark: 'Sombre',
+      sepia: 'Sépia',
+    },
+    about: 'À propos',
+    version: 'Version',
   },
 };

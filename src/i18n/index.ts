@@ -10,6 +10,7 @@ export { formatDate, formatFileSize, formatNumber } from './format';
 export { default as i18n } from './i18n';
 export {
   DEFAULT_LOCALE,
+  effectiveLocalePreference,
   getEnabledLocales,
   LOCALE_NAMES,
   LOCALES,

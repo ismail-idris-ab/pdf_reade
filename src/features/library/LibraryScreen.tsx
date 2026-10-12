@@ -14,6 +14,7 @@ import {
   GridIcon,
   ListIcon,
   SearchIcon,
+  SettingsIcon,
   SortIcon,
 } from '@/components/icons';
 import { EmptyState, IconButton } from '@/components/ui';
@@ -270,6 +271,12 @@ function TopBar({ search, onSearch, onOpenSort }: TopBarProps) {
           icon={<SortIcon color={palette.foreground} />}
           accessibilityLabel={t('library.sort')}
           onPress={onOpenSort}
+        />
+        <IconButton
+          testID="library-settings"
+          icon={<SettingsIcon color={palette.foreground} />}
+          accessibilityLabel={t('settings.title')}
+          onPress={() => router.push('/settings')}
         />
       </View>
       <View className="mx-2 min-h-12 flex-row items-center rounded-xl border border-border bg-surface pl-3">

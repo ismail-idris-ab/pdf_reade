@@ -5,6 +5,7 @@ export const ha: Catalog = {
   common: {
     cancel: 'Soke',
     close: 'Rufe',
+    back: 'Koma baya',
     errorToast: '{{title}}. {{message}}',
   },
   errors: {
@@ -234,5 +235,18 @@ export const ha: Catalog = {
     imageToPdfCount_other: 'Hotuna {{count}} a shirye don mayar da su PDF',
     imageToPdfComingSoon: 'Mayar da waɗannan zuwa PDF yana zuwa nan gaba kaɗan.',
     imageToPdfEmpty: 'Ba a karɓi wani hoto ba.',
+  },
+  settings: {
+    title: 'Saituna',
+    appearance: 'Kamanni',
+    theme: 'Jigo',
+    themeOptions: {
+      system: 'Yi amfani da saitin waya',
+      light: 'Haske',
+      dark: 'Duhu',
+      sepia: 'Sepia',
+    },
+    about: 'Game da manhaja',
+    version: 'Siga',
   },
 };

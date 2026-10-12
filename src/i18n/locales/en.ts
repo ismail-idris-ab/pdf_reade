@@ -4,6 +4,7 @@ export const en = {
   common: {
     cancel: 'Cancel',
     close: 'Close',
+    back: 'Back',
     errorToast: '{{title}}. {{message}}',
   },
   errors: {
@@ -236,6 +237,19 @@ export const en = {
     imageToPdfCount_other: '{{count}} images ready to turn into a PDF',
     imageToPdfComingSoon: 'Turning these into a PDF is coming soon.',
     imageToPdfEmpty: 'No images were received.',
+  },
+  settings: {
+    title: 'Settings',
+    appearance: 'Appearance',
+    theme: 'Theme',
+    themeOptions: {
+      system: 'Use phone setting',
+      light: 'Light',
+      dark: 'Dark',
+      sepia: 'Sepia',
+    },
+    about: 'About',
+    version: 'Version',
   },
 } as const;
 

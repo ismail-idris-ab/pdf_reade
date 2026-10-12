@@ -60,7 +60,7 @@ function ThemedStack() {
   useIntentRouter();
 
   // Protected routes.
-  // - Behind onboarding: index (home). Every app route added later must go
+  // - Behind onboarding: index (home), settings. Every app route added later must go
   //   inside the first Protected group too.
   // - Before onboarding only: onboarding.
   // - Unguarded: dev/* (dev tools, design gallery), intentionally reachable at
@@ -81,6 +81,7 @@ function ThemedStack() {
     >
       <Stack.Protected guard={onboardingComplete}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="settings" />
       </Stack.Protected>
       <Stack.Protected guard={!onboardingComplete}>
         <Stack.Screen name="onboarding" />

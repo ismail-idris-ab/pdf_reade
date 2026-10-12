@@ -57,7 +57,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
   **Done when:** opening a PDF from WhatsApp and a file manager lands directly in the reader; sharing 5 images from Gallery opens Image-to-PDF prefilled.
   Note (from T1.2, updated in T1.3): every content:// URI stored in the `files` table — a picked row's `path`, or the fallback `uri` kept on a scanned row when a pick of the same file was merged into it — must hold a persisted URI grant. Transient "Open with"/share URIs must be copied into the cache (`copyContentUriToCache`) and stored by file path with `uri` null, never by URI, so `prunePickedDocuments` stays safe.
 
-- [ ] **T1.7 Settings screen** `[launch]`
+- [x] **T1.7 Settings screen** `[launch]`
   One screen collecting app-wide settings built elsewhere: Theme (T0.3 `THEME_PREFERENCES`), Language (mounts `LanguagePicker` from T0.6), Open-source licences (T7.5), Analytics opt-out (T6.4), Send crash reports (T6.6), app version. Reachable from the library header.
   **Done when:** theme and language changes apply immediately and survive a restart; with `enabledLocales: ["en"]` the language list shows only "Use phone language" and English.
 

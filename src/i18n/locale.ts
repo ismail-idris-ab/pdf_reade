@@ -47,3 +47,14 @@ export function resolveLocale(
   }
   return DEFAULT_LOCALE;
 }
+
+/**
+ * The preference to show as current in the language switcher: a saved locale
+ * that has since been disabled behaves as "system".
+ */
+export function effectiveLocalePreference(
+  preference: LocalePreference,
+  enabled: readonly Locale[],
+): LocalePreference {
+  return preference === 'system' || enabled.includes(preference) ? preference : 'system';
+}

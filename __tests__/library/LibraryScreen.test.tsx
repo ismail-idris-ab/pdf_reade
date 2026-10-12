@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import { router } from 'expo-router';
 import Storage from 'expo-sqlite/kv-store';
 import { AppState, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -336,5 +337,11 @@ describe('LibraryScreen', () => {
     } finally {
       globals.__DEV__ = true;
     }
+  });
+
+  it('opens Settings from the header', async () => {
+    await renderLibrary();
+    await fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
+    expect(router.push).toHaveBeenCalledWith('/settings');
   });
 });
