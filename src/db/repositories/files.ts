@@ -295,6 +295,32 @@ export function createFilesRepository(db: AppDatabase) {
       return db.select().from(files).where(eq(files.id, id)).get();
     },
 
+    /**
+     * An existing row with this name and size — and, when `mtime` is given,
+     * the same modification time to the second — already in the library.
+     * Used to dedupe a cached "Open with"/share hand-off (T1.6) against a
+     * file the storage scan (or an earlier pick) already indexed, so it does
+     * not get listed twice. `copyContentUriToCache` reports no modification
+     * time, so callers pass `mtime: null` and match on name and size alone,
+     * the same fallback `mergeContentDuplicates` uses for picks whose
+     * provider reported none. The oldest matching row wins.
+     */
+    findByNameSize(name: string, size: number, mtime: number | null): FileRow | undefined {
+      return db
+        .select()
+        .from(files)
+        .where(
+          and(
+            eq(files.name, name),
+            eq(files.size, size),
+            mtime === null ? undefined : sql`${files.mtime} / 1000 = ${Math.trunc(mtime / 1000)}`,
+          ),
+        )
+        .orderBy(asc(files.id))
+        .limit(1)
+        .get();
+    },
+
     getByPath(path: string): FileRow | undefined {
       return db.select().from(files).where(eq(files.path, path)).get();
     },

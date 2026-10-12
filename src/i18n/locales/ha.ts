@@ -224,4 +224,15 @@ export const ha: Catalog = {
     phoneStorage: 'Ma’ajiyar waya',
     sdCard: 'Katin SD',
   },
+  intents: {
+    openNotFound: 'Ba a iya buɗe wannan fayil ba. Wataƙila an cire shi daga ɗakin karatunka.',
+    readerComingSoon:
+      'Cikakken na’urar karatu yana zuwa nan gaba kaɗan. Yanzu, wannan yana tabbatar kawai cewa fayil ɗin ya zo.',
+    imageToPdfTitle: 'An karɓi hotuna',
+    imageToPdfCount_one: 'Hoto {{count}} a shirye don mayar da shi PDF',
+    imageToPdfCount_many: 'Hotuna {{count}} a shirye don mayar da su PDF',
+    imageToPdfCount_other: 'Hotuna {{count}} a shirye don mayar da su PDF',
+    imageToPdfComingSoon: 'Mayar da waɗannan zuwa PDF yana zuwa nan gaba kaɗan.',
+    imageToPdfEmpty: 'Ba a karɓi wani hoto ba.',
+  },
 };

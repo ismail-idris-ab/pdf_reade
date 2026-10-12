@@ -237,4 +237,35 @@ describe('files repository batch writes', () => {
     expect(repos.files.getById(withFallback.id)?.uri).toBeNull();
     expect(repos.files.getById(openedLate.id)?.uri).toBe('content://p/opened-late');
   });
+
+  describe('findByNameSize', () => {
+    it('matches on name and size alone when mtime is null', () => {
+      const repos = setup();
+      const row = repos.files.upsert(newFile({ name: 'report.pdf', size: 1024, mtime: 5_000 }));
+      expect(repos.files.findByNameSize('report.pdf', 1024, null)).toEqual(row);
+    });
+
+    it('matches mtime to the second, not the millisecond', () => {
+      const repos = setup();
+      const row = repos.files.upsert(newFile({ name: 'report.pdf', size: 1024, mtime: 5_900 }));
+      expect(repos.files.findByNameSize('report.pdf', 1024, 5_100)).toEqual(row);
+      expect(repos.files.findByNameSize('report.pdf', 1024, 7_000)).toBeUndefined();
+    });
+
+    it('requires both name and size to match', () => {
+      const repos = setup();
+      repos.files.upsert(newFile({ name: 'report.pdf', size: 1024 }));
+      expect(repos.files.findByNameSize('other.pdf', 1024, null)).toBeUndefined();
+      expect(repos.files.findByNameSize('report.pdf', 2048, null)).toBeUndefined();
+    });
+
+    it('picks the oldest row when several match', () => {
+      const repos = setup();
+      const first = repos.files.upsert(
+        newFile({ path: '/a/report.pdf', name: 'report.pdf', size: 1024 }),
+      );
+      repos.files.upsert(newFile({ path: '/b/report.pdf', name: 'report.pdf', size: 1024 }));
+      expect(repos.files.findByNameSize('report.pdf', 1024, null)?.id).toBe(first.id);
+    });
+  });
 });

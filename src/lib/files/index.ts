@@ -1,13 +1,23 @@
+import type { EventSubscription } from 'expo-modules-core';
+
 import FileIndexModule, {
   type CachedContent,
   type FileStat,
+  type IncomingIntent,
   type PickedDocument,
   type ScannedFile,
   type SharedWriteAccessResult,
 } from '../../../modules/file-index/src/FileIndexModule';
 import { toAppError } from '@/lib/errors';
 
-export type { CachedContent, FileStat, PickedDocument, ScannedFile, SharedWriteAccessResult };
+export type {
+  CachedContent,
+  FileStat,
+  IncomingIntent,
+  PickedDocument,
+  ScannedFile,
+  SharedWriteAccessResult,
+};
 export {
   useAllFilesAccess,
   useAllFilesAccessStore,
@@ -154,4 +164,27 @@ export async function share(paths: readonly string[], mime: string): Promise<voi
   } catch (error) {
     throw toAppError(error);
   }
+}
+
+/**
+ * The VIEW or SEND intent the app was launched with, or null for a normal
+ * launch. Consumes it natively: a second call (e.g. from a remount) returns
+ * null, so a cold-start hand-off cannot be processed twice. A warm start
+ * (app already running) arrives through `onIncomingIntent` instead.
+ */
+export function getLaunchIntent(): IncomingIntent | null {
+  try {
+    return FileIndexModule.getLaunchIntent();
+  } catch (error) {
+    throw toAppError(error);
+  }
+}
+
+/**
+ * Subscribes to VIEW/SEND intents that reach the app while it is already
+ * running (warm start). Call `.remove()` on the returned subscription to
+ * unsubscribe.
+ */
+export function onIncomingIntent(listener: (event: IncomingIntent) => void): EventSubscription {
+  return FileIndexModule.addListener('onIncomingIntent', listener);
 }

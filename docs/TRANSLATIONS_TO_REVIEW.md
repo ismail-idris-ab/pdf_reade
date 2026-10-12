@@ -181,3 +181,11 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `details.pickedFile` | Picked file | Fayil da aka zaɓa | Fichier choisi | T1.4 |
 | `details.phoneStorage` | Phone storage | Ma’ajiyar waya | Stockage du téléphone | T1.4 |
 | `details.sdCard` | SD card | Katin SD | Carte SD | T1.4 |
+| `intents.openNotFound` | This file couldn't be opened. It may have been removed from your library. | Ba a iya buɗe wannan fayil ba. Wataƙila an cire shi daga ɗakin karatunka. | Ce fichier n’a pas pu être ouvert. Il a peut-être été retiré de votre bibliothèque. | T1.6 |
+| `intents.readerComingSoon` | The full reader is coming soon. For now, this just confirms the file arrived. | Cikakken na’urar karatu yana zuwa nan gaba kaɗan. Yanzu, wannan yana tabbatar kawai cewa fayil ɗin ya zo. | La liseuse complète arrive bientôt. Pour l’instant, ceci confirme seulement que le fichier est arrivé. | T1.6 |
+| `intents.imageToPdfTitle` | Images received | An karɓi hotuna | Images reçues | T1.6 |
+| `intents.imageToPdfCount_one` | {{count}} image ready to turn into a PDF | Hoto {{count}} a shirye don mayar da shi PDF | {{count}} image prête à devenir un PDF | T1.6 |
+| `intents.imageToPdfCount_many` | {{count}} images ready to turn into a PDF | Hotuna {{count}} a shirye don mayar da su PDF | {{count}} d’images prêtes à devenir un PDF | T1.6 |
+| `intents.imageToPdfCount_other` | {{count}} images ready to turn into a PDF | Hotuna {{count}} a shirye don mayar da su PDF | {{count}} images prêtes à devenir un PDF | T1.6 |
+| `intents.imageToPdfComingSoon` | Turning these into a PDF is coming soon. | Mayar da waɗannan zuwa PDF yana zuwa nan gaba kaɗan. | La conversion en PDF arrive bientôt. | T1.6 |
+| `intents.imageToPdfEmpty` | No images were received. | Ba a karɓi wani hoto ba. | Aucune image n’a été reçue. | T1.6 |

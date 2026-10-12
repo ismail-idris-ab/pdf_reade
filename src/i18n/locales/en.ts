@@ -225,6 +225,18 @@ export const en = {
     phoneStorage: 'Phone storage',
     sdCard: 'SD card',
   },
+  intents: {
+    openNotFound: "This file couldn't be opened. It may have been removed from your library.",
+    readerComingSoon:
+      'The full reader is coming soon. For now, this just confirms the file arrived.',
+    imageToPdfTitle: 'Images received',
+    // Plural by `count` (CLDR: en and ha use one/other, fr also many).
+    imageToPdfCount_one: '{{count}} image ready to turn into a PDF',
+    imageToPdfCount_many: '{{count}} images ready to turn into a PDF',
+    imageToPdfCount_other: '{{count}} images ready to turn into a PDF',
+    imageToPdfComingSoon: 'Turning these into a PDF is coming soon.',
+    imageToPdfEmpty: 'No images were received.',
+  },
 } as const;
 
 type Widen<T> = { [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };

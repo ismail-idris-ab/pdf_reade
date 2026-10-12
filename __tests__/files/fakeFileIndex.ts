@@ -7,7 +7,10 @@
 // seed it with `addFile` / `addFolder`, inspect it with `exists`, and reset it
 // with `resetFs` in `beforeEach`. Shared-storage write access (apiVersion 5)
 // starts granted; `setSharedWriteAccess` / `setSharedWriteRequestOutcome`
-// control it (`resetFs` resets them too). Every function is a jest.fn, so tests can
+// control it (`resetFs` resets them too). Incoming intents (apiVersion 6):
+// `setLaunchIntent` sets what the next `getLaunchIntent()` call answers (cold
+// start, consumed on read, like natively), `emitIncomingIntent` fires a warm
+// start. Every function is a jest.fn, so tests can
 // still override single calls (e.g. `mockRejectedValueOnce`).
 import type {
   CachedContent,
@@ -19,6 +22,7 @@ import type {
   FolderListing,
   FolderStats,
   ImportResult,
+  IncomingIntent,
   PickDocumentsOptions,
   PickedDocument,
   ScanBatchEvent,
@@ -63,12 +67,14 @@ function createFakeFileIndex() {
     onScanBatch: new Set(),
     onScanComplete: new Set(),
     onScanError: new Set(),
+    onIncomingIntent: new Set(),
   };
   const nodes = new Map<string, Node>();
   const documents = new Map<string, FakeDocument>();
   const refusingRename = new Set<string>();
   let sharedWriteGranted = true;
   let sharedWriteOutcome: SharedWriteAccessResult = 'granted';
+  let launchIntent: IncomingIntent | null = null;
   let clock = 1_700_000_000_000;
   const now = () => (clock += 1000);
 
@@ -87,6 +93,7 @@ function createFakeFileIndex() {
     refusingRename.clear();
     sharedWriteGranted = true;
     sharedWriteOutcome = 'granted';
+    launchIntent = null;
     nodes.set(FAKE_MY_FILES_ROOT, { isDirectory: true, size: 0, mtime: 0 });
   }
   resetFs();
@@ -150,7 +157,7 @@ function createFakeFileIndex() {
   };
 
   return {
-    apiVersion: 5,
+    apiVersion: 6,
     addListener: jest.fn(addListener),
     hasAllFilesAccess: jest.fn<boolean, []>(() => true),
     openAllFilesAccessSettings: jest.fn<Promise<void>, []>(() => Promise.resolve()),
@@ -172,6 +179,14 @@ function createFakeFileIndex() {
     ),
     listPersistedUris: jest.fn<string[], []>(() => []),
     releasePersistedUri: jest.fn<void, [string]>(),
+
+    // Consumes the launch intent, as the native side does: a second call
+    // returns null, so a remount cannot process the same hand-off twice.
+    getLaunchIntent: jest.fn<IncomingIntent | null, []>(() => {
+      const intent = launchIntent;
+      launchIntent = null;
+      return intent;
+    }),
 
     hasSharedWriteAccess: jest.fn<boolean, []>(() => sharedWriteGranted),
     // Answers with the outcome set by setSharedWriteRequestOutcome; 'granted'
@@ -336,9 +351,20 @@ function createFakeFileIndex() {
     emitError(event: ScanErrorEvent) {
       for (const listener of [...listeners.onScanError]) listener(event);
     },
+    /** Sets what the next getLaunchIntent() call answers (cold start). */
+    setLaunchIntent(intent: IncomingIntent | null) {
+      launchIntent = intent;
+    },
+    /** Fires onIncomingIntent (warm start), as a VIEW/SEND reaching a running app. */
+    emitIncomingIntent(event: IncomingIntent) {
+      for (const listener of [...listeners.onIncomingIntent]) listener(event);
+    },
     listenerCount(): number {
       return (
-        listeners.onScanBatch.size + listeners.onScanComplete.size + listeners.onScanError.size
+        listeners.onScanBatch.size +
+        listeners.onScanComplete.size +
+        listeners.onScanError.size +
+        listeners.onIncomingIntent.size
       );
     },
   };

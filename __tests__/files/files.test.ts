@@ -18,6 +18,7 @@ import {
   fileOpErrorKind,
   folderStats,
   getFileIndexApiVersion,
+  getLaunchIntent,
   getMyFilesRoot,
   isNameErrorKind,
   isTempEntry,
@@ -30,6 +31,7 @@ import {
   listFolder,
   moveFile,
   nativeErrorCode,
+  onIncomingIntent,
   openAllFilesAccessSettings,
   printPdf,
   renameDocument,
@@ -175,9 +177,39 @@ describe('toNewFile', () => {
 
 describe('native wrappers', () => {
   it('reads the api version and all-files access', () => {
-    expect(getFileIndexApiVersion()).toBe(5);
+    expect(getFileIndexApiVersion()).toBe(6);
     native.hasAllFilesAccess.mockReturnValueOnce(false);
     expect(hasAllFilesAccess()).toBe(false);
+  });
+
+  it('reads the launch intent and wraps a failure (apiVersion 6)', () => {
+    expect(getLaunchIntent()).toBeNull();
+    const intent = {
+      action: 'view' as const,
+      uris: ['content://p/doc'],
+      mimeType: 'application/pdf',
+    };
+    native.setLaunchIntent(intent);
+    expect(getLaunchIntent()).toEqual(intent);
+    // Consumed: a second call (e.g. a remount) sees nothing.
+    expect(getLaunchIntent()).toBeNull();
+
+    native.getLaunchIntent.mockImplementationOnce(() => {
+      throw nativeError('UNKNOWN');
+    });
+    expect(() => getLaunchIntent()).toThrow(AppError);
+  });
+
+  it('subscribes to and unsubscribes from onIncomingIntent', () => {
+    const received: unknown[] = [];
+    const subscription = onIncomingIntent((event) => received.push(event));
+    const intent = { action: 'send' as const, uris: ['content://p/a'], mimeType: 'image/jpeg' };
+    native.emitIncomingIntent(intent);
+    expect(received).toEqual([intent]);
+
+    subscription.remove();
+    native.emitIncomingIntent(intent);
+    expect(received).toEqual([intent]);
   });
 
   it('reads and requests shared-storage write access (apiVersion 5)', async () => {

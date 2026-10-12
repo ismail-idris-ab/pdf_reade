@@ -163,3 +163,62 @@ describe('Sentry config plugin', () => {
     expect(() => pluginNames()).toThrow('SENTRY_ORG and SENTRY_PROJECT are required');
   });
 });
+
+type MainActivityResults = { contents: string; language: string };
+type MainActivityMod = (mod: {
+  modResults: MainActivityResults;
+}) => Promise<{ modResults: MainActivityResults }>;
+
+/** The parts of Expo's MainActivity template the hand-off plugin anchors on. */
+const MAIN_ACTIVITY_TEMPLATE = [
+  'package com.ismailidris.pdfreader',
+  '',
+  'import android.os.Bundle',
+  '',
+  'class MainActivity : ReactActivity() {',
+  '  override fun onCreate(savedInstanceState: Bundle?) {',
+  '    super.onCreate(null)',
+  '  }',
+  '}',
+].join('\n');
+
+/** Runs the config's own MainActivity mod over `contents`, the way prebuild does. */
+async function applyMainActivityMod(contents: string): Promise<string> {
+  const mods = (
+    config as typeof config & { mods?: { android?: { mainActivity?: MainActivityMod } } }
+  ).mods;
+  const mod = mods?.android?.mainActivity;
+  if (!mod) throw new Error('the MainActivity mod is not configured');
+  const { modResults } = await mod({ modResults: { contents, language: 'kt' } });
+  return modResults.contents;
+}
+
+describe('hand-off intent MainActivity mod', () => {
+  it('claims a warm hand-off in onNewIntent before super', async () => {
+    const out = await applyMainActivityMod(MAIN_ACTIVITY_TEMPLATE);
+    expect(out).toContain('import android.content.Intent');
+    expect(out).toMatch(
+      /IncomingIntentCapture\.claim\(intent\)\s*\n\s*super\.onNewIntent\(intent\)/,
+    );
+  });
+
+  it('claims the launch intent in onCreate before super', async () => {
+    const out = await applyMainActivityMod(MAIN_ACTIVITY_TEMPLATE);
+    const claim = out.indexOf('IncomingIntentCapture.claimLaunch(intent)');
+    expect(claim).toBeGreaterThan(out.indexOf('override fun onCreate'));
+    expect(claim).toBeLessThan(out.indexOf('super.onCreate(null)'));
+  });
+
+  it('leaves an already generated MainActivity unchanged on a second prebuild', async () => {
+    const once = await applyMainActivityMod(MAIN_ACTIVITY_TEMPLATE);
+    await expect(applyMainActivityMod(once)).resolves.toBe(once);
+  });
+
+  it('fails clearly when the template no longer has the onCreate anchor', async () => {
+    const changed = MAIN_ACTIVITY_TEMPLATE.replace(
+      'super.onCreate(null)',
+      'super.onCreate(savedInstanceState)',
+    );
+    await expect(applyMainActivityMod(changed)).rejects.toThrow('MainActivity.onCreate');
+  });
+});

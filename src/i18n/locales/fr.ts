@@ -230,4 +230,16 @@ export const fr: Catalog = {
     phoneStorage: 'Stockage du téléphone',
     sdCard: 'Carte SD',
   },
+  intents: {
+    openNotFound:
+      'Ce fichier n’a pas pu être ouvert. Il a peut-être été retiré de votre bibliothèque.',
+    readerComingSoon:
+      'La liseuse complète arrive bientôt. Pour l’instant, ceci confirme seulement que le fichier est arrivé.',
+    imageToPdfTitle: 'Images reçues',
+    imageToPdfCount_one: '{{count}} image prête à devenir un PDF',
+    imageToPdfCount_many: '{{count}} d’images prêtes à devenir un PDF',
+    imageToPdfCount_other: '{{count}} images prêtes à devenir un PDF',
+    imageToPdfComingSoon: 'La conversion en PDF arrive bientôt.',
+    imageToPdfEmpty: 'Aucune image n’a été reçue.',
+  },
 };

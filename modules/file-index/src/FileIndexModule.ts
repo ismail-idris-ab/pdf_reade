@@ -135,10 +135,32 @@ export type DocumentCapabilities = {
 
 export type SharedWriteAccessResult = 'granted' | 'denied' | 'blocked';
 
+/** What another app asked us to do with its files (apiVersion 6). */
+export type IncomingIntentAction =
+  /** ACTION_VIEW: open one document. */
+  | 'view'
+  /** ACTION_SEND / ACTION_SEND_MULTIPLE: receive one or more files. */
+  | 'send';
+
+export type IncomingIntent = {
+  action: IncomingIntentAction;
+  /**
+   * The handed-over URIs, in the order the sender gave them; never empty (an
+   * intent without a usable URI is not reported at all). The grants are
+   * transient: copy each one with copyContentUriToCache and store it by the
+   * resulting path, never by URI, or prunePickedDocuments will drop the row.
+   */
+  uris: string[];
+  /** The intent's MIME type, when the sender set one. */
+  mimeType: string | null;
+};
+
 export type FileIndexEvents = {
   onScanBatch: (event: ScanBatchEvent) => void;
   onScanComplete: (event: ScanCompleteEvent) => void;
   onScanError: (event: ScanErrorEvent) => void;
+  /** A VIEW or SEND intent reaching an app that is already running. */
+  onIncomingIntent: (event: IncomingIntent) => void;
 };
 
 declare class FileIndexNativeModule extends NativeModule<FileIndexEvents> {
@@ -175,6 +197,21 @@ declare class FileIndexNativeModule extends NativeModule<FileIndexEvents> {
    * all-files access (the UI sends users to openAllFilesAccessSettings).
    */
   requestSharedWriteAccess(): Promise<SharedWriteAccessResult>;
+
+  // ── Incoming intents (apiVersion 6) ──────────────────────────────────────
+  /**
+   * The VIEW or SEND intent the app was launched with, or null when it was
+   * opened normally. Consumes it: a second call returns null, so a remount
+   * cannot process the same hand-off twice. Warm starts arrive through the
+   * onIncomingIntent event instead.
+   *
+   * The native side takes the hand-off as the module is created, before any
+   * JS runs, and clears it from the intent: React Native's Linking reads the
+   * same intent for the launch URL, and expo-router would otherwise route a
+   * content:// or file:// hand-off as a deep link and show "Unmatched
+   * Route". A real deep link is never claimed, so it still routes normally.
+   */
+  getLaunchIntent(): IncomingIntent | null;
 
   // ── File actions (apiVersion 4) ──────────────────────────────────────────
   // Paths must lie inside shared storage or the My Files root; anything else

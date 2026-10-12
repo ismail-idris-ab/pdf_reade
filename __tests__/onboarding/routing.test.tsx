@@ -3,7 +3,9 @@ import { act, renderRouter, screen } from 'expo-router/testing-library';
 import { Text } from 'react-native';
 
 import RootLayout from '../../app/_layout';
+import ImageToPdfScreen from '../../app/image-to-pdf';
 import OnboardingScreen from '../../app/onboarding';
+import OpenScreen from '../../app/open';
 import FileIndexModule from '../../modules/file-index/src/FileIndexModule';
 import type { FakeFileIndexModule } from '../files/fakeFileIndex';
 import { useOnboardingStore } from '@/features/onboarding/store';
@@ -34,7 +36,13 @@ function Home() {
   return <Text>home</Text>;
 }
 
-const routes = { _layout: RootLayout, index: Home, onboarding: OnboardingScreen };
+const routes = {
+  _layout: RootLayout,
+  index: Home,
+  onboarding: OnboardingScreen,
+  open: OpenScreen,
+  'image-to-pdf': ImageToPdfScreen,
+};
 
 // renderRouter attaches its helpers to the value render() returns, which is
 // a promise in RNTL 14: keep that object (returning it from an async function
@@ -107,5 +115,35 @@ describe('onboarding route guard', () => {
     await launch('/');
     expect(native.listPersistedUris).toHaveBeenCalled();
     expect(native.startScan).not.toHaveBeenCalled();
+  });
+});
+
+describe('T1.6 incoming-intent routes bypass the onboarding guard', () => {
+  it('opens a document handed to the app at cold start, before onboarding, without completing it', async () => {
+    useOnboardingStore.setState({ onboardingComplete: false });
+    native.setLaunchIntent({
+      action: 'view',
+      uris: ['content://p/doc'],
+      mimeType: 'application/pdf',
+    });
+    native.copyContentUriToCache.mockResolvedValueOnce({
+      path: '/cache/doc.pdf',
+      name: 'doc.pdf',
+      nameFromProvider: true,
+      size: 10,
+      mime: 'application/pdf',
+    });
+
+    const app = await launch('/');
+    // A few more microtask hops than other routes need: copy, classify, the
+    // db write, then the route change. renderRouter runs under fake timers,
+    // so this flushes microtasks directly rather than through setImmediate.
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    expect(app.getPathname()).toBe('/open');
+    expect(screen.getByText('doc.pdf')).toBeOnTheScreen();
+    expect(useOnboardingStore.getState().onboardingComplete).toBe(false);
   });
 });

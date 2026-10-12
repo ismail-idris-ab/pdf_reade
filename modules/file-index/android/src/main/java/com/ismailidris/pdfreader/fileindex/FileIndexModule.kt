@@ -112,6 +112,17 @@ class FileIndexModule : Module() {
   // permission listener and OnDestroy race for it, and only one can settle it.
   private val pendingWriteAccess = PendingSlot<OneShotPromise>()
 
+  /**
+   * The file hand-off the app was launched with, taken at module creation —
+   * before any JS runs. It has to be claimed this early: React Native's
+   * Linking reads the same intent to report the launch URL, and expo-router
+   * would turn a content:// or file:// hand-off into a route of its own and
+   * land on "Unmatched Route" instead of letting us open the file. Clearing
+   * the intent here leaves nothing for it to misread, while a real deep link
+   * never parses as a hand-off and so is left untouched.
+   */
+  private val launchHandOff = AtomicReference<IncomingIntents.Parsed?>(null)
+
   private val context: Context
     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
 
@@ -124,9 +135,15 @@ class FileIndexModule : Module() {
       API_VERSION
     }
 
-    Events(EVENT_SCAN_BATCH, EVENT_SCAN_COMPLETE, EVENT_SCAN_ERROR)
+    Events(EVENT_SCAN_BATCH, EVENT_SCAN_COMPLETE, EVENT_SCAN_ERROR, EVENT_INCOMING_INTENT)
 
     OnCreate {
+      // Warm-start hand-offs reach us from MainActivity.onNewIntent, which
+      // claims them before React Native can report the URI to JS. One claimed
+      // before the module existed is picked up by claimLaunchHandOff below,
+      // for getLaunchIntent: no JS is subscribed yet to receive an event.
+      IncomingIntentCapture.setListener { sendEvent(EVENT_INCOMING_INTENT, it.toEventMap()) }
+      claimLaunchHandOff()
       // Repairs what a crash left behind (interrupted case-only renames,
       // unfinished copies) once per module start, off the main thread.
       scope.launch {
@@ -142,6 +159,7 @@ class FileIndexModule : Module() {
     }
 
     OnDestroy {
+      IncomingIntentCapture.setListener(null)
       scanCancelFlags.values.forEach { it.set(true) }
       pendingPick.take()?.promise?.reject(moduleDestroyed())
       // A storage-access dialog may still be showing; its listener will find
@@ -167,6 +185,20 @@ class FileIndexModule : Module() {
     AsyncFunction("requestSharedWriteAccess") { promise: Promise ->
       requestSharedWriteAccess(promise)
     }
+
+    // endregion
+
+    // region incoming intents (apiVersion 6)
+
+    Function("getLaunchIntent") {
+      getLaunchIntent()
+    }
+
+    // Fallback for a warm intent MainActivity did not claim (the config
+    // plugin not applied to a stale native project, say). claim() is a no-op
+    // once the hand-off has already been taken out of the intent, so the
+    // normal path does not deliver twice.
+    OnNewIntent { intent -> IncomingIntentCapture.claim(intent) }
 
     // endregion
 
@@ -482,6 +514,59 @@ class FileIndexModule : Module() {
       context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
   }
+
+  // endregion
+
+  // region incoming intents (apiVersion 6)
+
+  /**
+   * The VIEW or SEND(_MULTIPLE) intent the current activity was launched or
+   * last resumed with, or null when none is usable. Consumes what it reports
+   * by clearing those fields on the activity's live intent, so a second call -
+   * even from a freshly created module instance after a JS reload - parses
+   * the same intent to null instead of handing the same files over twice.
+   */
+  // Synchronized with claimLaunchHandOff: OnCreate and this JS call can run
+  // on different threads, and the claim is a check-then-set.
+  @Synchronized
+  private fun getLaunchIntent(): Map<String, Any?>? {
+    // Normally already claimed at OnCreate; claimed here instead when the
+    // activity only arrived afterwards. Either way it is handed out once.
+    claimLaunchHandOff()
+    return launchHandOff.getAndSet(null)?.toEventMap()
+  }
+
+  /**
+   * Takes the launch intent's hand-off, if it holds one, and clears it from
+   * the intent so nothing else can route it. Does nothing once a hand-off is
+   * already held, or when the intent is not one (a deep link, a normal
+   * launch), so it is safe to call more than once.
+   */
+  @Synchronized
+  private fun claimLaunchHandOff() {
+    if (launchHandOff.get() != null) return
+    // MainActivity.onCreate claims the intent it was created with.
+    IncomingIntentCapture.takeLaunch()?.let {
+      launchHandOff.set(it)
+      return
+    }
+    // MainActivity may already have claimed it (a warm intent arriving
+    // while no module was attached, e.g. during a JS reload).
+    IncomingIntentCapture.take()?.let {
+      launchHandOff.set(it)
+      return
+    }
+    val intent = appContext.currentActivity?.intent ?: return
+    val parsed = IncomingIntentCapture.read(intent) ?: return
+    IncomingIntentCapture.consume(intent)
+    launchHandOff.set(parsed)
+  }
+
+  private fun IncomingIntents.Parsed.toEventMap(): Map<String, Any?> = mapOf(
+    "action" to action,
+    "uris" to uris,
+    "mimeType" to mimeType,
+  )
 
   // endregion
 
@@ -1069,13 +1154,14 @@ class FileIndexModule : Module() {
   // endregion
 
   companion object {
-    const val API_VERSION = 5
+    const val API_VERSION = 6
 
     private const val TAG = "FileIndex"
 
     private const val EVENT_SCAN_BATCH = "onScanBatch"
     private const val EVENT_SCAN_COMPLETE = "onScanComplete"
     private const val EVENT_SCAN_ERROR = "onScanError"
+    private const val EVENT_INCOMING_INTENT = "onIncomingIntent"
 
     private const val IMPORT_DIR = "imports"
     private const val SHARE_DIR = "share"
