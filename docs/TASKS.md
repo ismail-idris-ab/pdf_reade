@@ -52,7 +52,7 @@ Each task is sized for one Claude Code session. Do them in order. Process: `docs
 - [ ] **T1.5 Recycle bin** `[post-launch]`
   Trash into app-private dir with metadata, restore to original path (conflict → rename), 30-day auto-purge on launch, empty trash.
 
-- [ ] **T1.6 Intents: "Open with" + share target** `[launch]`
+- [x] **T1.6 Intents: "Open with" + share target** `[launch]`
   Config plugin adding intent filters: `VIEW` for `application/pdf` and DOCX/XLSX/CSV/TXT MIME types; `SEND` / `SEND_MULTIPLE` for PDFs and images (images → Image-to-PDF flow). Handle cold and warm starts.
   **Done when:** opening a PDF from WhatsApp and a file manager lands directly in the reader; sharing 5 images from Gallery opens Image-to-PDF prefilled.
   Note (from T1.2, updated in T1.3): every content:// URI stored in the `files` table — a picked row's `path`, or the fallback `uri` kept on a scanned row when a pick of the same file was merged into it — must hold a persisted URI grant. Transient "Open with"/share URIs must be copied into the cache (`copyContentUriToCache`) and stored by file path with `uri` null, never by URI, so `prunePickedDocuments` stays safe.
