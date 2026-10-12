@@ -1,4 +1,4 @@
-import { formatFileSize } from '@/i18n/format';
+import { formatDate, formatFileSize } from '@/i18n/format';
 import { en } from '@/i18n/locales/en';
 import { fr } from '@/i18n/locales/fr';
 
@@ -31,5 +31,19 @@ describe('formatFileSize', () => {
   it('treats invalid sizes as zero', () => {
     expect(formatFileSize(Number.NaN, 'en', en.units)).toBe('0 B');
     expect(formatFileSize(-5, 'en', en.units)).toBe('0 B');
+  });
+});
+
+describe('formatDate', () => {
+  // Midday UTC, so the calendar date is the same in every test time zone.
+  const OCT_4_2026 = Date.UTC(2026, 9, 4, 12);
+
+  it('uses the locale’s medium date style', () => {
+    expect(formatDate(OCT_4_2026, 'en')).toBe('Oct 4, 2026');
+    expect(plain(formatDate(OCT_4_2026, 'fr'))).toBe('4 oct. 2026');
+  });
+
+  it('does not throw on invalid input', () => {
+    expect(() => formatDate(Number.NaN, 'en')).not.toThrow();
   });
 });

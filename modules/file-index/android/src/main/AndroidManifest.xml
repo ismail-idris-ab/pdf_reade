@@ -9,6 +9,11 @@
   <uses-permission
     android:name="android.permission.READ_EXTERNAL_STORAGE"
     android:maxSdkVersion="29" />
+  <!-- File actions (rename, move, copy, delete) on shared storage on API 26-29,
+       asked at runtime on first use. API 30+ uses MANAGE_EXTERNAL_STORAGE. -->
+  <uses-permission
+    android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+    android:maxSdkVersion="29" />
 
   <!-- requestLegacyExternalStorage keeps direct file access on API 29. -->
   <application android:requestLegacyExternalStorage="true">

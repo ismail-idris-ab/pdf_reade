@@ -8,6 +8,21 @@ import org.junit.Test
 
 class DocumentPickTest {
   @Test
+  fun pickOptionsPersistByDefault() {
+    val options = PickOptions()
+    assertTrue(options.persist)
+    assertFalse(options.multiple)
+  }
+
+  @Test
+  fun persistModeFollowsTheOptionAndTheGrantedFlags() {
+    assertEquals(GrantMode.NONE, DocumentPick.persistMode(persistRequested = false, writeGranted = true))
+    assertEquals(GrantMode.NONE, DocumentPick.persistMode(persistRequested = false, writeGranted = false))
+    assertEquals(GrantMode.READ_WRITE, DocumentPick.persistMode(persistRequested = true, writeGranted = true))
+    assertEquals(GrantMode.READ, DocumentPick.persistMode(persistRequested = true, writeGranted = false))
+  }
+
+  @Test
   fun typeFilterWithoutTypesAllowsAnything() {
     assertEquals(DocumentPick.TypeFilter("*/*", null), DocumentPick.typeFilter(emptyList()))
     assertEquals(DocumentPick.TypeFilter("*/*", null), DocumentPick.typeFilter(listOf(" ", "")))

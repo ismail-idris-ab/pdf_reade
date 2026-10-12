@@ -1,12 +1,23 @@
+import type { EventSubscription } from 'expo-modules-core';
+
 import FileIndexModule, {
   type CachedContent,
   type FileStat,
+  type IncomingIntent,
   type PickedDocument,
   type ScannedFile,
+  type SharedWriteAccessResult,
 } from '../../../modules/file-index/src/FileIndexModule';
 import { toAppError } from '@/lib/errors';
 
-export type { CachedContent, FileStat, PickedDocument, ScannedFile };
+export type {
+  CachedContent,
+  FileStat,
+  IncomingIntent,
+  PickedDocument,
+  ScannedFile,
+  SharedWriteAccessResult,
+};
 export {
   useAllFilesAccess,
   useAllFilesAccessStore,
@@ -16,12 +27,14 @@ export {
 export {
   APP_PACKAGE,
   DEFAULT_SCAN_EXTS,
+  MY_FILES_DIR_NAME,
   SCANS_DIR_NAME,
   classifySource,
   extForMime,
   mimeForExt,
   toNewFile,
 } from './classify';
+export { EXT_GROUPS, GROUP_EXTS, GROUPED_EXTS, extGroupOf, type ExtGroup } from './extGroups';
 export {
   DEFAULT_PICK_MIME_TYPES,
   listPersistedUris,
@@ -29,6 +42,46 @@ export {
   releasePersistedUri,
   type PickDocumentsOptions,
 } from './picker';
+export {
+  ERR_DUPLICATE_LEFT,
+  ERR_NAME_EXISTS,
+  ERR_NAME_INVALID,
+  MAX_NAME_BYTES,
+  copyFile,
+  createFolder,
+  deleteDocument,
+  deleteFile,
+  deleteFolder,
+  documentCapabilities,
+  fileOpErrorKind,
+  isNameErrorKind,
+  isTempEntry,
+  keepExtension,
+  folderStats,
+  getMyFilesRoot,
+  importDocuments,
+  isInMyFiles,
+  listFolder,
+  moveFile,
+  nativeErrorCode,
+  printPdf,
+  renameDocument,
+  renameFile,
+  renameFolder,
+  tryGetMyFilesRoot,
+  splitExtension,
+  validateFileName,
+  type DocumentCapabilities,
+  type FileOpResult,
+  type FolderEntry,
+  type FolderListing,
+  type FolderStats,
+  type ImportResult,
+  type NameErrorKind,
+  type FileOpErrorKind,
+  type NameProblem,
+  type RenameDocumentResult,
+} from './ops';
 export {
   scanDocuments,
   type ScanDocumentsOptions,
@@ -59,6 +112,33 @@ export async function openAllFilesAccessSettings(): Promise<void> {
   }
 }
 
+/**
+ * Whether file actions on shared storage (rename, move, copy, delete) are
+ * allowed right now: all-files access on Android 11+, the legacy
+ * WRITE_EXTERNAL_STORAGE permission on Android 8–10.
+ */
+export function hasSharedWriteAccess(): boolean {
+  try {
+    return FileIndexModule.hasSharedWriteAccess();
+  } catch (error) {
+    throw toAppError(error);
+  }
+}
+
+/**
+ * Android 8–10: shows the system prompt for the legacy storage write
+ * permission. 'blocked' means it was denied with "don't ask again", so only
+ * the app's Settings page can grant it. Android 11+ never prompts: it answers
+ * from all-files access ('granted' or 'denied').
+ */
+export async function requestSharedWriteAccess(): Promise<SharedWriteAccessResult> {
+  try {
+    return await FileIndexModule.requestSharedWriteAccess();
+  } catch (error) {
+    throw toAppError(error);
+  }
+}
+
 /** Existence, type, size and mtime (epoch ms) of a path. */
 export async function stat(path: string): Promise<FileStat> {
   try {
@@ -84,4 +164,27 @@ export async function share(paths: readonly string[], mime: string): Promise<voi
   } catch (error) {
     throw toAppError(error);
   }
+}
+
+/**
+ * The VIEW or SEND intent the app was launched with, or null for a normal
+ * launch. Consumes it natively: a second call (e.g. from a remount) returns
+ * null, so a cold-start hand-off cannot be processed twice. A warm start
+ * (app already running) arrives through `onIncomingIntent` instead.
+ */
+export function getLaunchIntent(): IncomingIntent | null {
+  try {
+    return FileIndexModule.getLaunchIntent();
+  } catch (error) {
+    throw toAppError(error);
+  }
+}
+
+/**
+ * Subscribes to VIEW/SEND intents that reach the app while it is already
+ * running (warm start). Call `.remove()` on the returned subscription to
+ * unsubscribe.
+ */
+export function onIncomingIntent(listener: (event: IncomingIntent) => void): EventSubscription {
+  return FileIndexModule.addListener('onIncomingIntent', listener);
 }

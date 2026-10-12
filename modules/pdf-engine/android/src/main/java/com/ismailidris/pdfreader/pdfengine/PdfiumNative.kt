@@ -28,7 +28,12 @@ internal object PdfiumNative {
   /** Page size in PDF points as [width, height]. */
   fun pageSize(handle: Long, index: Int): FloatArray = nativePageSize(handle, index)
 
-  fun renderPage(handle: Long, index: Int, bitmap: Bitmap) = nativeRenderPage(handle, index, bitmap)
+  /**
+   * Renders page [index] scaled to [sizeX] x [sizeY] px at the bitmap's
+   * top-left; anything beyond the bitmap is clipped. The defaults fill the bitmap.
+   */
+  fun renderPage(handle: Long, index: Int, bitmap: Bitmap, sizeX: Int = bitmap.width, sizeY: Int = bitmap.height) =
+    nativeRenderPage(handle, index, bitmap, sizeX, sizeY)
 
   fun importAllPages(dest: Long, src: Long) = nativeImportAllPages(dest, src)
 
@@ -40,7 +45,7 @@ internal object PdfiumNative {
   private external fun nativeClose(handle: Long)
   private external fun nativePageCount(handle: Long): Int
   private external fun nativePageSize(handle: Long, index: Int): FloatArray
-  private external fun nativeRenderPage(handle: Long, index: Int, bitmap: Bitmap)
+  private external fun nativeRenderPage(handle: Long, index: Int, bitmap: Bitmap, sizeX: Int, sizeY: Int)
   private external fun nativeImportAllPages(dest: Long, src: Long)
   private external fun nativeSave(handle: Long, path: ByteArray)
 }

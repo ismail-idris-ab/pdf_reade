@@ -2,6 +2,7 @@ import { Text, View } from 'react-native';
 
 import { BottomSheet, ListItem } from '@/components/ui';
 import {
+  effectiveLocalePreference,
   getEnabledLocales,
   LOCALE_NAMES,
   useLocaleStore,
@@ -30,9 +31,7 @@ export function LanguagePicker({ visible, onClose }: LanguagePickerProps) {
     { value: 'system', label: t('language.system') },
     ...enabled.map((locale) => ({ value: locale, label: LOCALE_NAMES[locale] })),
   ];
-  // A saved locale that has since been disabled behaves as "system".
-  const effective: LocalePreference =
-    preference === 'system' || enabled.includes(preference) ? preference : 'system';
+  const effective = effectiveLocalePreference(preference, enabled);
 
   return (
     <BottomSheet visible={visible} onClose={onClose} title={t('language.title')}>

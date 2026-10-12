@@ -72,6 +72,19 @@ describe('pickDocuments', () => {
     });
   });
 
+  it('passes persist only when set (native default: true)', async () => {
+    await pickDocuments({ persist: false });
+    expect(native.pickDocuments).toHaveBeenLastCalledWith({
+      mimeTypes: [...DEFAULT_PICK_MIME_TYPES],
+      multiple: true,
+      persist: false,
+    });
+    await pickDocuments({ persist: true });
+    expect(native.pickDocuments).toHaveBeenLastCalledWith(
+      expect.objectContaining({ persist: true }),
+    );
+  });
+
   it.each(['ERR_NO_ACTIVITY', 'ERR_PICK_IN_PROGRESS', 'ERR_NO_PICKER', 'ERR_MODULE_DESTROYED'])(
     'maps %s to an UNKNOWN AppError',
     async (code) => {

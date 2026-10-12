@@ -1,4 +1,4 @@
-import { resolveLocale } from '@/i18n/locale';
+import { effectiveLocalePreference, resolveLocale } from '@/i18n/locale';
 
 describe('resolveLocale', () => {
   const launch = ['en'] as const;
@@ -23,6 +23,18 @@ describe('resolveLocale', () => {
   it('falls back to English', () => {
     expect(resolveLocale('system', ['de', 'yo'], all)).toBe('en');
     expect(resolveLocale('system', [], all)).toBe('en');
+  });
+});
+
+describe('effectiveLocalePreference', () => {
+  it('keeps "system" and enabled choices', () => {
+    expect(effectiveLocalePreference('system', ['en'])).toBe('system');
+    expect(effectiveLocalePreference('en', ['en'])).toBe('en');
+    expect(effectiveLocalePreference('fr', ['en', 'fr'])).toBe('fr');
+  });
+
+  it('treats a saved locale that is now disabled as "system"', () => {
+    expect(effectiveLocalePreference('ha', ['en'])).toBe('system');
   });
 });
 

@@ -121,10 +121,17 @@ JNIEXPORT jfloatArray JNICALL JNI_FN(nativePageSize)(JNIEnv* env, jobject, jlong
   return result;
 }
 
-// Renders the page scaled to fill an ARGB_8888 bitmap allocated by Kotlin.
+// Renders the page scaled to sizeX x sizeY pixels, anchored at the top-left
+// of an ARGB_8888 bitmap allocated by Kotlin. PDFium clips whatever falls
+// outside the bitmap, so a render size taller than the bitmap crops the
+// bottom of the page instead of squashing it.
 JNIEXPORT void JNICALL JNI_FN(nativeRenderPage)(JNIEnv* env, jobject, jlong handle, jint index,
-                                                jobject bitmap) {
+                                                jobject bitmap, jint sizeX, jint sizeY) {
   std::lock_guard<std::mutex> guard(g_lock);
+  if (sizeX <= 0 || sizeY <= 0) {
+    throwJava(env, kStateException, "Render size must be positive");
+    return;
+  }
   AndroidBitmapInfo info{};
   if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS ||
       info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
@@ -154,7 +161,7 @@ JNIEXPORT void JNICALL JNI_FN(nativeRenderPage)(JNIEnv* env, jobject, jlong hand
   }
   FPDFBitmap_FillRect(target, 0, 0, width, height, 0xFFFFFFFF);
   // Android stores ARGB_8888 as RGBA bytes; ask PDFium for that order.
-  FPDF_RenderPageBitmap(target, page, 0, 0, width, height, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+  FPDF_RenderPageBitmap(target, page, 0, 0, sizeX, sizeY, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
   FPDFBitmap_Destroy(target);
   AndroidBitmap_unlockPixels(env, bitmap);
   FPDF_ClosePage(page);

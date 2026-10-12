@@ -13,6 +13,7 @@ import { ErrorScreen } from '@/components/ErrorScreen';
 import { ToastHost } from '@/components/ui';
 import { getDatabase, getRepositories } from '@/db/client';
 import migrations from '@/db/migrations/migrations';
+import { useIntentRouter } from '@/features/intents';
 import { useOnboardingStore } from '@/features/onboarding/store';
 import { useDeviceLocaleSync } from '@/i18n';
 import { useLibraryMaintenance } from '@/lib/library/useLibraryMaintenance';
@@ -56,13 +57,18 @@ function ThemedStack() {
   const { palette } = useTheme();
   const onboardingComplete = useOnboardingStore((state) => state.onboardingComplete);
   useLibraryMaintenance(onboardingComplete);
+  useIntentRouter();
 
   // Protected routes.
-  // - Behind onboarding: index (home). Every app route added later must go
+  // - Behind onboarding: index (home), settings. Every app route added later must go
   //   inside the first Protected group too.
   // - Before onboarding only: onboarding.
-  // - Unguarded: dev/* (design gallery), intentionally reachable at any time
-  //   in dev builds; in release builds the screen itself redirects to /.
+  // - Unguarded: dev/* (dev tools, design gallery), intentionally reachable at
+  //   any time in dev builds; in release builds each screen redirects to /.
+  //   open and image-to-pdf (T1.6) are unguarded too, deliberately: a user
+  //   who explicitly opened or shared a file with this app must land there
+  //   even before onboarding is done, and doing so must not mark onboarding
+  //   complete (useIntentRouter never calls completeOnboarding).
   // When the flag flips, expo-router drops the now-protected screen and lands
   // on the first available one, so there is no redirect to loop on; a deep
   // link to a protected route lands on the first available route instead.
@@ -75,10 +81,13 @@ function ThemedStack() {
     >
       <Stack.Protected guard={onboardingComplete}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="settings" />
       </Stack.Protected>
       <Stack.Protected guard={!onboardingComplete}>
         <Stack.Screen name="onboarding" />
       </Stack.Protected>
+      <Stack.Screen name="open" />
+      <Stack.Screen name="image-to-pdf" />
     </Stack>
   );
 }

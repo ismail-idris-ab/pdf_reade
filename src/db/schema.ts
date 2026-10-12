@@ -19,7 +19,8 @@ import {
 // 0001_files_fts.sql. Such a migration must recreate those triggers and run
 // INSERT INTO files_fts(files_fts) VALUES ('rebuild').
 
-export const FILE_SOURCES = ['downloads', 'whatsapp', 'scans', 'device'] as const;
+// 'myfiles': documents in the app's own MyFiles folder (filled from T1.4).
+export const FILE_SOURCES = ['downloads', 'whatsapp', 'scans', 'device', 'myfiles'] as const;
 export type FileSource = (typeof FILE_SOURCES)[number];
 
 export const READING_MODES = ['vertical', 'horizontal'] as const;

@@ -61,6 +61,13 @@ export const APP_PACKAGE = 'com.ismailidris.pdfreader';
  */
 export const SCANS_DIR_NAME = 'Scans';
 
+/**
+ * Folder, directly inside the app's files dir (internal or external, as for
+ * SCANS_DIR_NAME), holding the app's own documents ("My Files"). Assumption
+ * shared with T1.4, which must create and fill it there.
+ */
+export const MY_FILES_DIR_NAME = 'MyFiles';
+
 // Root of a storage volume: primary (/storage/emulated/<user>, the legacy
 // /sdcard symlinks, /storage/self/primary) or removable (/storage/XXXX-XXXX).
 const VOLUME_ROOT =
@@ -79,13 +86,14 @@ const WHATSAPP_DIRS = [
 
 const DOWNLOADS_DIR = underVolume('Download');
 
-const SCANS_DIRS = [
-  new RegExp(
-    `^/data/(?:user/\\d+|data)/${escape(APP_PACKAGE)}/files/${escape(SCANS_DIR_NAME)}/`,
-    'i',
-  ),
-  underVolume(`Android/data/${escape(APP_PACKAGE)}/files/${escape(SCANS_DIR_NAME)}`),
+// A folder directly inside the app's internal or external files dir.
+const appFilesDirs = (dirName: string) => [
+  new RegExp(`^/data/(?:user/\\d+|data)/${escape(APP_PACKAGE)}/files/${escape(dirName)}/`, 'i'),
+  underVolume(`Android/data/${escape(APP_PACKAGE)}/files/${escape(dirName)}`),
 ];
+
+const SCANS_DIRS = appFilesDirs(SCANS_DIR_NAME);
+const MY_FILES_DIRS = appFilesDirs(MY_FILES_DIR_NAME);
 
 /**
  * Library source of an absolute file path (a `file://` prefix is accepted).
@@ -96,6 +104,7 @@ export function classifySource(path: string): FileSource {
   if (WHATSAPP_DIRS.some((dir) => dir.test(normalised))) return 'whatsapp';
   if (DOWNLOADS_DIR.test(normalised)) return 'downloads';
   if (SCANS_DIRS.some((dir) => dir.test(normalised))) return 'scans';
+  if (MY_FILES_DIRS.some((dir) => dir.test(normalised))) return 'myfiles';
   return 'device';
 }
 

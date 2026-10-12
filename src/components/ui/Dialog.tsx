@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { Button, type ButtonVariant } from './Button';
@@ -7,6 +8,10 @@ export type DialogAction = {
   label: string;
   onPress: () => void;
   variant?: ButtonVariant;
+  disabled?: boolean;
+  /** Shows a spinner and blocks presses while the action runs. */
+  loading?: boolean;
+  testID?: string;
 };
 
 export type DialogProps = {
@@ -17,10 +22,20 @@ export type DialogProps = {
   actions: DialogAction[];
   /** Backdrop tap and Android back. */
   onDismiss: () => void;
+  /** Extra content between the message and the actions (e.g. a text field). */
+  children?: ReactNode;
   testID?: string;
 };
 
-export function Dialog({ visible, title, message, actions, onDismiss, testID }: DialogProps) {
+export function Dialog({
+  visible,
+  title,
+  message,
+  actions,
+  onDismiss,
+  children,
+  testID,
+}: DialogProps) {
   return (
     <FullScreenModal
       visible={visible}
@@ -41,13 +56,17 @@ export function Dialog({ visible, title, message, actions, onDismiss, testID }: 
           {title}
         </Text>
         {message ? <Text className="mt-2 text-base text-muted">{message}</Text> : null}
+        {children}
         <View className="mt-5 flex-row flex-wrap justify-end gap-2">
           {actions.map((action, index) => (
             <Button
               // Index key: translated labels may collide.
               key={index}
+              testID={action.testID}
               label={action.label}
               variant={action.variant ?? 'ghost'}
+              disabled={action.disabled}
+              loading={action.loading}
               onPress={action.onPress}
             />
           ))}

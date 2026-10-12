@@ -9,12 +9,40 @@ import {
   DEFAULT_SCAN_EXTS,
   classifySource,
   copyContentUriToCache,
+  copyFile,
+  createFolder,
+  deleteDocument,
+  deleteFile,
+  deleteFolder,
+  documentCapabilities,
+  fileOpErrorKind,
+  folderStats,
   getFileIndexApiVersion,
+  getLaunchIntent,
+  getMyFilesRoot,
+  isNameErrorKind,
+  isTempEntry,
+  keepExtension,
+  splitExtension,
   hasAllFilesAccess,
+  hasSharedWriteAccess,
+  importDocuments,
+  isInMyFiles,
+  listFolder,
+  moveFile,
+  nativeErrorCode,
+  onIncomingIntent,
   openAllFilesAccessSettings,
+  printPdf,
+  renameDocument,
+  renameFile,
+  renameFolder,
+  requestSharedWriteAccess,
   share,
   stat,
   toNewFile,
+  tryGetMyFilesRoot,
+  validateFileName,
 } from '@/lib/files';
 
 jest.mock('../../modules/file-index/src/FileIndexModule', () =>
@@ -64,6 +92,15 @@ describe('classifySource', () => {
   });
 
   it.each([
+    `/data/user/0/${APP_PACKAGE}/files/MyFiles/notes.pdf`,
+    `/data/data/${APP_PACKAGE}/files/MyFiles/Sub/notes.pdf`,
+    `/storage/emulated/0/Android/data/${APP_PACKAGE}/files/MyFiles/notes.pdf`,
+    `file:///data/user/0/${APP_PACKAGE}/files/myfiles/notes.pdf`,
+  ])('%s -> myfiles', (input) => {
+    expect(classifySource(input)).toBe('myfiles');
+  });
+
+  it.each([
     '/storage/emulated/0/Download2/report.pdf',
     '/storage/emulated/0/MyDownload/report.pdf',
     '/storage/emulated/0/Downloads/report.pdf',
@@ -75,6 +112,9 @@ describe('classifySource', () => {
     `/data/user/0/${APP_PACKAGE}/files/Scans2/scan.pdf`,
     `/data/user/0/${APP_PACKAGE}/cache/Scans/scan.pdf`,
     '/data/user/0/com.other.app/files/Scans/scan.pdf',
+    `/data/user/0/${APP_PACKAGE}/files/MyFiles2/notes.pdf`,
+    '/data/user/0/com.other.app/files/MyFiles/notes.pdf',
+    '/storage/emulated/0/MyFiles/notes.pdf',
     '/storage/emulated/0/Scans/scan.pdf',
     '/storage/emulated/0/Documents/cv.pdf',
   ])('%s -> device', (input) => {
@@ -137,9 +177,64 @@ describe('toNewFile', () => {
 
 describe('native wrappers', () => {
   it('reads the api version and all-files access', () => {
-    expect(getFileIndexApiVersion()).toBe(3);
+    expect(getFileIndexApiVersion()).toBe(6);
     native.hasAllFilesAccess.mockReturnValueOnce(false);
     expect(hasAllFilesAccess()).toBe(false);
+  });
+
+  it('reads the launch intent and wraps a failure (apiVersion 6)', () => {
+    expect(getLaunchIntent()).toBeNull();
+    const intent = {
+      action: 'view' as const,
+      uris: ['content://p/doc'],
+      mimeType: 'application/pdf',
+    };
+    native.setLaunchIntent(intent);
+    expect(getLaunchIntent()).toEqual(intent);
+    // Consumed: a second call (e.g. a remount) sees nothing.
+    expect(getLaunchIntent()).toBeNull();
+
+    native.getLaunchIntent.mockImplementationOnce(() => {
+      throw nativeError('UNKNOWN');
+    });
+    expect(() => getLaunchIntent()).toThrow(AppError);
+  });
+
+  it('subscribes to and unsubscribes from onIncomingIntent', () => {
+    const received: unknown[] = [];
+    const subscription = onIncomingIntent((event) => received.push(event));
+    const intent = { action: 'send' as const, uris: ['content://p/a'], mimeType: 'image/jpeg' };
+    native.emitIncomingIntent(intent);
+    expect(received).toEqual([intent]);
+
+    subscription.remove();
+    native.emitIncomingIntent(intent);
+    expect(received).toEqual([intent]);
+  });
+
+  it('reads and requests shared-storage write access (apiVersion 5)', async () => {
+    native.resetFs();
+    native.setSharedWriteAccess(false);
+    expect(hasSharedWriteAccess()).toBe(false);
+    native.setSharedWriteRequestOutcome('blocked');
+    await expect(requestSharedWriteAccess()).resolves.toBe('blocked');
+    expect(hasSharedWriteAccess()).toBe(false);
+    native.setSharedWriteRequestOutcome('granted');
+    await expect(requestSharedWriteAccess()).resolves.toBe('granted');
+    expect(hasSharedWriteAccess()).toBe(true);
+    expect(native.requestSharedWriteAccess).toHaveBeenCalledTimes(2);
+  });
+
+  it('normalises shared-write access failures to AppErrors', async () => {
+    native.hasSharedWriteAccess.mockImplementationOnce(() => {
+      throw nativeError('UNSUPPORTED');
+    });
+    expect(() => hasSharedWriteAccess()).toThrow(AppError);
+    native.requestSharedWriteAccess.mockRejectedValueOnce(nativeError('PERMISSION_DENIED'));
+    await expect(requestSharedWriteAccess()).rejects.toMatchObject({
+      name: 'AppError',
+      code: 'PERMISSION_DENIED',
+    });
   });
 
   it('normalises a synchronous hasAllFilesAccess failure', () => {
@@ -192,5 +287,188 @@ describe('native wrappers', () => {
   it('maps unknown native failures to UNKNOWN', async () => {
     native.stat.mockRejectedValueOnce(new Error('weird'));
     await expect(stat('/a.pdf')).rejects.toMatchObject({ name: 'AppError', code: 'UNKNOWN' });
+  });
+});
+
+describe('file action wrappers (apiVersion 4)', () => {
+  const ROOT = '/data/user/0/com.ismailidris.pdfreader/files/MyFiles';
+
+  beforeEach(() => native.resetFs());
+
+  it('passes calls through and returns native results', async () => {
+    native.addFile(`${ROOT}/a.pdf`, 10, 5);
+    expect(getMyFilesRoot()).toBe(ROOT);
+    await expect(renameFile(`${ROOT}/a.pdf`, 'b.pdf')).resolves.toEqual({
+      path: `${ROOT}/b.pdf`,
+      name: 'b.pdf',
+      size: 10,
+      mtime: 5,
+    });
+    await createFolder(ROOT, 'Sub');
+    await expect(moveFile(`${ROOT}/b.pdf`, `${ROOT}/Sub`)).resolves.toMatchObject({
+      path: `${ROOT}/Sub/b.pdf`,
+    });
+    await expect(copyFile(`${ROOT}/Sub/b.pdf`, `${ROOT}/Sub`)).resolves.toMatchObject({
+      name: 'b (copy).pdf',
+    });
+    await expect(listFolder(`${ROOT}/Sub`)).resolves.toMatchObject({
+      entries: expect.arrayContaining([expect.objectContaining({ name: 'b.pdf' })]),
+    });
+    await expect(folderStats(`${ROOT}/Sub`)).resolves.toEqual({
+      fileCount: 2,
+      folderCount: 0,
+      totalBytes: 20,
+    });
+    await expect(renameFolder(`${ROOT}/Sub`, 'Docs')).resolves.toMatchObject({
+      path: `${ROOT}/Docs`,
+      isDirectory: true,
+    });
+    await deleteFile(`${ROOT}/Docs/b.pdf`);
+    await deleteFolder(`${ROOT}/Docs`);
+    expect(native.exists(`${ROOT}/Docs`)).toBe(false);
+
+    native.addDocument('content://p/1', { name: 'x.pdf', size: 3 });
+    await expect(importDocuments(['content://p/1', 'content://p/2'], ROOT)).resolves.toEqual([
+      { uri: 'content://p/1', file: expect.objectContaining({ path: `${ROOT}/x.pdf` }) },
+      { uri: 'content://p/2', errorCode: 'NOT_FOUND' },
+    ]);
+    await expect(renameDocument('content://p/1', 'y.pdf')).resolves.toEqual({
+      uri: 'content://p/1-renamed',
+      name: 'y.pdf',
+      renamed: true,
+    });
+    await deleteDocument('content://p/1-renamed');
+    await printPdf('/a.pdf', 'a.pdf');
+    expect(native.printPdf).toHaveBeenCalledWith('/a.pdf', 'a.pdf');
+  });
+
+  it('keeps the non-shared name errors distinguishable', async () => {
+    native.addFile(`${ROOT}/a.pdf`);
+    native.addFile(`${ROOT}/b.pdf`);
+    const exists = await renameFile(`${ROOT}/a.pdf`, 'b.pdf').catch((e: unknown) => e);
+    expect(exists).toBeInstanceOf(AppError);
+    expect((exists as AppError).code).toBe('UNKNOWN');
+    expect(nativeErrorCode(exists)).toBe('ERR_NAME_EXISTS');
+    expect(fileOpErrorKind(exists)).toBe('nameExists');
+
+    const invalid = await createFolder(ROOT, '..').catch((e: unknown) => e);
+    expect(fileOpErrorKind(invalid)).toBe('nameInvalid');
+
+    native.deleteFile.mockRejectedValueOnce(nativeError('NOT_FOUND'));
+    const gone = await deleteFile(`${ROOT}/zzz.pdf`).catch((e: unknown) => e);
+    expect((gone as AppError).code).toBe('NOT_FOUND');
+    expect(fileOpErrorKind(gone)).toBeNull();
+    expect(nativeErrorCode(gone)).toBe('NOT_FOUND');
+
+    native.moveFile.mockRejectedValueOnce(nativeError('ERR_FILE_OP_FAILED'));
+    const failed = await moveFile('/x', ROOT).catch((e: unknown) => e);
+    expect((failed as AppError).code).toBe('UNKNOWN');
+    expect(nativeErrorCode(failed)).toBe('ERR_FILE_OP_FAILED');
+    expect(fileOpErrorKind(failed)).toBeNull();
+  });
+
+  it('documentCapabilities never rejects', async () => {
+    await expect(documentCapabilities('content://p/1')).resolves.toEqual({
+      canRename: true,
+      canDelete: true,
+    });
+    native.documentCapabilities.mockRejectedValueOnce(new Error('boom'));
+    await expect(documentCapabilities('content://p/1')).resolves.toEqual({
+      canRename: false,
+      canDelete: false,
+    });
+  });
+
+  it('getMyFilesRoot throws an AppError; tryGetMyFilesRoot returns null', () => {
+    native.getMyFilesRoot.mockImplementationOnce(() => {
+      throw nativeError('PERMISSION_DENIED');
+    });
+    expect(() => getMyFilesRoot()).toThrow(AppError);
+    native.getMyFilesRoot.mockImplementationOnce(() => {
+      throw new Error('no module');
+    });
+    expect(tryGetMyFilesRoot()).toBeNull();
+  });
+
+  it('isInMyFiles matches the native root and the classifier locations', () => {
+    expect(isInMyFiles(`${ROOT}/a/b.pdf`, ROOT)).toBe(true);
+    expect(isInMyFiles(ROOT, ROOT)).toBe(true);
+    expect(isInMyFiles('/custom/root/x.pdf', '/custom/root')).toBe(true);
+    expect(isInMyFiles(`${ROOT}2/x.pdf`, '/custom/root')).toBe(false);
+    expect(isInMyFiles(`${ROOT}/x.pdf`, null)).toBe(true);
+    expect(isInMyFiles('/storage/emulated/0/Download/x.pdf', ROOT)).toBe(false);
+  });
+
+  it.each([
+    ['', 'empty'],
+    ['a/b', 'invalidChars'],
+    ['a\0b', 'invalidChars'],
+    ['a\\b', 'invalidChars'],
+    ['a:b', 'invalidChars'],
+    ['a*b', 'invalidChars'],
+    ['a?b', 'invalidChars'],
+    ['a"b', 'invalidChars'],
+    ['a<b', 'invalidChars'],
+    ['a>b', 'invalidChars'],
+    ['a|b', 'invalidChars'],
+    ['a\u0001b', 'invalidChars'],
+    ['a\nb', 'invalidChars'],
+    ['a\u007fb', 'invalidChars'],
+    ['Résumé (final) #2.pdf', null],
+    ['.', 'leadingDot'],
+    ['..', 'leadingDot'],
+    ['report.pdf', null],
+    ['.hidden', 'leadingDot'],
+    ['report.v2.pdf', null],
+    ['a.', null],
+  ])('validateFileName(%j) -> %s', (name, problem) => {
+    expect(validateFileName(name)).toBe(problem);
+  });
+
+  it('limits names to 255 UTF-8 bytes, not characters', () => {
+    expect(validateFileName('a'.repeat(255))).toBeNull();
+    expect(validateFileName('a'.repeat(256))).toBe('tooLong');
+    // "é" is 2 bytes in UTF-8.
+    expect(validateFileName('é'.repeat(127))).toBeNull();
+    expect(validateFileName('é'.repeat(128))).toBe('tooLong');
+  });
+});
+
+describe('name helpers', () => {
+  it('fileOpErrorKind recognises the codes with their own message', () => {
+    const error = (code: string) => new AppError('UNKNOWN', 'x', { cause: { code } });
+    // No longer a native code: renameDocument answers renamed: false instead.
+    expect(fileOpErrorKind(error('ERR_RENAME_UNSUPPORTED'))).toBeNull();
+    expect(fileOpErrorKind(error('ERR_DUPLICATE_LEFT'))).toBe('duplicateLeft');
+    expect(fileOpErrorKind(error('ERR_FILE_OP_FAILED'))).toBeNull();
+    expect(isNameErrorKind('nameExists')).toBe(true);
+    expect(isNameErrorKind('duplicateLeft')).toBe(false);
+    expect(isNameErrorKind(null)).toBe(false);
+  });
+
+  it('isTempEntry matches only native work files', () => {
+    // Names exactly as NameRules.kt writes them.
+    expect(isTempEntry('.report.pdf.tmp-1791412064000-1a2b')).toBe(true);
+    expect(isTempEntry('.rename-1791412064000-9f3c')).toBe(true);
+    expect(isTempEntry('.rename-1791412064000-9f3c.orig')).toBe(true);
+    expect(isTempEntry('.report.pdf')).toBe(false);
+    expect(isTempEntry('.hidden')).toBe(false);
+    expect(isTempEntry('report.tmp-1.pdf')).toBe(false);
+    expect(isTempEntry('notes.pdf')).toBe(false);
+  });
+
+  it('splitExtension follows the native rule', () => {
+    expect(splitExtension('a.b.pdf')).toEqual({ base: 'a.b', ext: '.pdf' });
+    expect(splitExtension('.hidden')).toEqual({ base: '.hidden', ext: '' });
+    expect(splitExtension('trailing.')).toEqual({ base: 'trailing.', ext: '' });
+    expect(splitExtension('plain')).toEqual({ base: 'plain', ext: '' });
+  });
+
+  it('keepExtension keeps a file’s extension', () => {
+    expect(keepExtension('Report', 'old.pdf')).toBe('Report.pdf');
+    expect(keepExtension('Report.pdf', 'old.pdf')).toBe('Report.pdf');
+    expect(keepExtension('Report.PDF', 'old.pdf')).toBe('Report.PDF');
+    expect(keepExtension('Report.txt', 'old.pdf')).toBe('Report.txt.pdf');
+    expect(keepExtension('Report.txt', 'no-extension')).toBe('Report.txt');
   });
 });

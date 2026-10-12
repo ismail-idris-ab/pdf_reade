@@ -1,4 +1,50 @@
+import type { AndroidConfig } from 'expo/config-plugins';
+
 import config from '../app.config';
+
+const WRITE_EXTERNAL_STORAGE = 'android.permission.WRITE_EXTERNAL_STORAGE';
+
+type AndroidManifest = AndroidConfig.Manifest.AndroidManifest;
+
+/** A <uses-permission> entry, with the attributes this config sets on it. */
+type UsesPermission = {
+  $: AndroidConfig.Manifest.ManifestUsesPermission['$'] & {
+    'android:maxSdkVersion'?: string;
+    'tools:replace'?: string;
+  };
+};
+
+/** `mods` is added by the manifest plugin, so it is not on ExpoConfig itself. */
+type ManifestMod = (mod: {
+  modResults: AndroidManifest;
+}) => Promise<{ modResults: AndroidManifest }>;
+type ConfigMods = { android?: { manifest?: ManifestMod } };
+
+/**
+ * Runs the config's own android manifest mod over `permissions`, the way
+ * prebuild does, and returns the resulting <uses-permission> entries.
+ */
+async function applyManifestMod(permissions: UsesPermission[]): Promise<UsesPermission[]> {
+  const manifest: AndroidManifest = {
+    manifest: {
+      $: { 'xmlns:android': 'http://schemas.android.com/apk/res/android' },
+      queries: [],
+      'uses-permission': permissions,
+    },
+  };
+  const mods = (config as typeof config & { mods?: ConfigMods }).mods;
+  const mod = mods?.android?.manifest;
+  if (!mod) throw new Error('the android manifest mod is not configured');
+  const { modResults: applied } = await mod({ modResults: manifest });
+  expect(applied.manifest.$['xmlns:tools']).toBe('http://schemas.android.com/tools');
+  return applied.manifest['uses-permission'] ?? [];
+}
+
+const entry = (name: string, maxSdkVersion?: string): UsesPermission => ({
+  $: maxSdkVersion
+    ? { 'android:name': name, 'android:maxSdkVersion': maxSdkVersion }
+    : { 'android:name': name },
+});
 
 type BuildPropertiesPlugin = [
   'expo-build-properties',
@@ -25,14 +71,51 @@ describe('app config', () => {
     expect(config.name).toBe('Pdf Reader');
   });
 
-  it('blocks the legacy shared-storage write permission', () => {
-    expect(config.android?.blockedPermissions).toContain(
-      'android.permission.WRITE_EXTERNAL_STORAGE',
-    );
+  it('no longer blocks the legacy shared-storage write permission', () => {
+    // File actions on shared storage need it on Android 8-10; the manifest
+    // mod below caps it at API 29 so Android 11+ never sees it.
+    expect(config.android?.blockedPermissions ?? []).not.toContain(WRITE_EXTERNAL_STORAGE);
   });
 
   it('targets Android only', () => {
     expect(config.platforms).toEqual(['android']);
+  });
+});
+
+describe('legacy write permission manifest mod', () => {
+  it('pins the permission to Android 10 and marks it as replacing library values', async () => {
+    const permissions = await applyManifestMod([entry(WRITE_EXTERNAL_STORAGE, '32')]);
+    expect(permissions).toEqual([
+      {
+        $: {
+          'android:name': WRITE_EXTERNAL_STORAGE,
+          'android:maxSdkVersion': '29',
+          'tools:replace': 'android:maxSdkVersion',
+        },
+      },
+    ]);
+  });
+
+  it('leaves exactly one entry when the template declared it more than once', async () => {
+    const permissions = await applyManifestMod([
+      entry(WRITE_EXTERNAL_STORAGE, '32'),
+      entry(WRITE_EXTERNAL_STORAGE),
+    ]);
+    expect(
+      permissions.filter((item) => item.$['android:name'] === WRITE_EXTERNAL_STORAGE),
+    ).toHaveLength(1);
+  });
+
+  it('adds the entry when the template declared none', async () => {
+    const permissions = await applyManifestMod([]);
+    expect(permissions.map((item) => item.$['android:name'])).toEqual([WRITE_EXTERNAL_STORAGE]);
+  });
+
+  it('keeps every other permission untouched', async () => {
+    const read = entry('android.permission.READ_EXTERNAL_STORAGE', '32');
+    const internet = entry('android.permission.INTERNET');
+    const permissions = await applyManifestMod([read, internet, entry(WRITE_EXTERNAL_STORAGE)]);
+    expect(permissions.slice(0, 2)).toEqual([read, internet]);
   });
 
   it('pins the SDK levels required by the spec and Play policy', () => {
@@ -78,5 +161,64 @@ describe('Sentry config plugin', () => {
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
     expect(() => pluginNames()).toThrow('SENTRY_ORG and SENTRY_PROJECT are required');
+  });
+});
+
+type MainActivityResults = { contents: string; language: string };
+type MainActivityMod = (mod: {
+  modResults: MainActivityResults;
+}) => Promise<{ modResults: MainActivityResults }>;
+
+/** The parts of Expo's MainActivity template the hand-off plugin anchors on. */
+const MAIN_ACTIVITY_TEMPLATE = [
+  'package com.ismailidris.pdfreader',
+  '',
+  'import android.os.Bundle',
+  '',
+  'class MainActivity : ReactActivity() {',
+  '  override fun onCreate(savedInstanceState: Bundle?) {',
+  '    super.onCreate(null)',
+  '  }',
+  '}',
+].join('\n');
+
+/** Runs the config's own MainActivity mod over `contents`, the way prebuild does. */
+async function applyMainActivityMod(contents: string): Promise<string> {
+  const mods = (
+    config as typeof config & { mods?: { android?: { mainActivity?: MainActivityMod } } }
+  ).mods;
+  const mod = mods?.android?.mainActivity;
+  if (!mod) throw new Error('the MainActivity mod is not configured');
+  const { modResults } = await mod({ modResults: { contents, language: 'kt' } });
+  return modResults.contents;
+}
+
+describe('hand-off intent MainActivity mod', () => {
+  it('claims a warm hand-off in onNewIntent before super', async () => {
+    const out = await applyMainActivityMod(MAIN_ACTIVITY_TEMPLATE);
+    expect(out).toContain('import android.content.Intent');
+    expect(out).toMatch(
+      /IncomingIntentCapture\.claim\(intent\)\s*\n\s*super\.onNewIntent\(intent\)/,
+    );
+  });
+
+  it('claims the launch intent in onCreate before super', async () => {
+    const out = await applyMainActivityMod(MAIN_ACTIVITY_TEMPLATE);
+    const claim = out.indexOf('IncomingIntentCapture.claimLaunch(intent)');
+    expect(claim).toBeGreaterThan(out.indexOf('override fun onCreate'));
+    expect(claim).toBeLessThan(out.indexOf('super.onCreate(null)'));
+  });
+
+  it('leaves an already generated MainActivity unchanged on a second prebuild', async () => {
+    const once = await applyMainActivityMod(MAIN_ACTIVITY_TEMPLATE);
+    await expect(applyMainActivityMod(once)).resolves.toBe(once);
+  });
+
+  it('fails clearly when the template no longer has the onCreate anchor', async () => {
+    const changed = MAIN_ACTIVITY_TEMPLATE.replace(
+      'super.onCreate(null)',
+      'super.onCreate(savedInstanceState)',
+    );
+    await expect(applyMainActivityMod(changed)).rejects.toThrow('MainActivity.onCreate');
   });
 });
