@@ -31,6 +31,21 @@ internal const val ERR_THUMBNAIL_TOO_LARGE = "ERR_THUMBNAIL_TOO_LARGE"
 /** Non-shared: a virtual (cloud / non-file) document; no thumbnail without downloading it. */
 internal const val ERR_THUMBNAIL_UNAVAILABLE = "ERR_THUMBNAIL_UNAVAILABLE"
 
+/** Non-shared: the docId is unknown or already closed (reader API). */
+internal const val ERR_DOC_NOT_OPEN = "ERR_DOC_NOT_OPEN"
+
+/** Non-shared: an argument is out of range or malformed, e.g. a page index (reader API). */
+internal const val ERR_INVALID_ARGUMENT = "ERR_INVALID_ARGUMENT"
+
+/** Non-shared: open failed with no user-fixable cause. */
+internal const val ERR_OPEN_FAILED = "ERR_OPEN_FAILED"
+
+/** Non-shared: reading outline or text failed with no user-fixable cause. */
+internal const val ERR_READ_FAILED = "ERR_READ_FAILED"
+
+/** Non-shared: a search stopped on an unexpected failure (onSearchDone errorCode). */
+internal const val ERR_SEARCH_FAILED = "ERR_SEARCH_FAILED"
+
 /** Parses PdfiumNative failures and maps FPDF_GetLastError codes to shared codes. */
 internal object PdfiumErrors {
   // FPDF_ERR_* values from fpdfview.h.
@@ -62,4 +77,13 @@ internal object PdfiumErrors {
     FPDF_ERR_SECURITY -> ErrorCode.UNSUPPORTED
     else -> null
   }
+
+  /**
+   * Shared code for a failed FPDF_LoadDocument in the reader. Like
+   * [errorCodeFor], except that a password failure is WRONG_PASSWORD when
+   * [passwordGiven] (a non-empty password was supplied) and PASSWORD_REQUIRED
+   * otherwise.
+   */
+  fun openErrorCodeFor(pdfiumCode: Int, fileExists: Boolean, passwordGiven: Boolean): ErrorCode? =
+    if (pdfiumCode == FPDF_ERR_PASSWORD && passwordGiven) ErrorCode.WRONG_PASSWORD else errorCodeFor(pdfiumCode, fileExists)
 }

@@ -44,6 +44,30 @@ class PdfiumErrorsTest {
   }
 
   @Test
+  fun openPasswordFailureIsRequiredWithoutAPasswordAndWrongWithOne() {
+    assertEquals(
+      ErrorCode.PASSWORD_REQUIRED,
+      PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_PASSWORD, fileExists = true, passwordGiven = false),
+    )
+    assertEquals(
+      ErrorCode.WRONG_PASSWORD,
+      PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_PASSWORD, fileExists = true, passwordGiven = true),
+    )
+  }
+
+  @Test
+  fun openOtherFailuresIgnoreThePassword() {
+    for (given in listOf(false, true)) {
+      assertEquals(ErrorCode.CORRUPT_FILE, PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_FORMAT, true, given))
+      assertEquals(ErrorCode.CORRUPT_FILE, PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_PAGE, true, given))
+      assertEquals(ErrorCode.NOT_FOUND, PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_FILE, false, given))
+      assertEquals(ErrorCode.CORRUPT_FILE, PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_FILE, true, given))
+      assertEquals(ErrorCode.UNSUPPORTED, PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_SECURITY, true, given))
+      assertNull(PdfiumErrors.openErrorCodeFor(PdfiumErrors.FPDF_ERR_UNKNOWN, true, given))
+    }
+  }
+
+  @Test
   fun constantsMatchFpdfview() {
     assertEquals(listOf(0, 1, 2, 3, 4, 5, 6), listOf(
       PdfiumErrors.FPDF_ERR_SUCCESS,

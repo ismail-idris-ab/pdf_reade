@@ -9,8 +9,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
-import android.system.ErrnoException
-import android.system.OsConstants
 import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import expo.modules.kotlin.exception.CodedException
@@ -323,19 +321,6 @@ internal class ThumbnailRenderer(
   @Suppress("DEPRECATION")
   private fun webpFormat(): Bitmap.CompressFormat =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
-
-  /** True when ENOSPC appears in the cause chain, as ErrnoException or in a message. */
-  private fun isNoSpace(error: Throwable): Boolean {
-    var current: Throwable? = error
-    while (current != null) {
-      if (current is CancellationException) return false
-      if (current is ErrnoException && current.errno == OsConstants.ENOSPC) return true
-      val text = current.message
-      if (text != null && (text.contains("ENOSPC") || text.contains("No space left on device"))) return true
-      current = current.cause
-    }
-    return false
-  }
 
   companion object {
     const val CACHE_DIR_NAME = "thumbs"

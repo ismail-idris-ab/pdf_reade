@@ -18,7 +18,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 class ThumbnailRequest : Record {
@@ -38,10 +37,15 @@ class ThumbnailRequest : Record {
   val widthPx: Double = 0.0
 }
 
+class SearchOptions : Record {
+  @Field
+  val matchCase: Boolean = false
+
+  @Field
+  val wholeWord: Boolean = false
+}
+
 class PdfEngineModule : Module() {
-  private val spike by lazy {
-    EngineSpike(appContext.reactContext ?: throw Exceptions.ReactContextLost())
-  }
   private val thumbnails by lazy {
     ThumbnailRenderer(appContext.reactContext ?: throw Exceptions.ReactContextLost())
   }
@@ -86,6 +90,17 @@ class PdfEngineModule : Module() {
   private val coordinator by coordinatorLazy
   private val destroyed = AtomicBoolean(false)
 
+  // Created on first use because it needs the React context. Shares the
+  // PDFium thread with thumbnails.
+  private val readerLazy = lazy {
+    ReaderEngine(
+      appContext.reactContext ?: throw Exceptions.ReactContextLost(),
+      searchScope = scope,
+      listener = searchListener,
+    )
+  }
+  private val reader by readerLazy
+
   override fun definition() = ModuleDefinition {
     Name("PdfEngine")
 
@@ -95,9 +110,23 @@ class PdfEngineModule : Module() {
       API_VERSION
     }
 
+    Events(EVENT_SEARCH_RESULT, EVENT_SEARCH_PROGRESS, EVENT_SEARCH_DONE)
+
+    // Creating the reader at start-up also deletes cache copies a previous
+    // process left behind (on IO).
+    OnCreate {
+      try {
+        readerLazy.value
+      } catch (e: Exception) {
+        Log.w(TAG, "Reader start-up failed: ${e.javaClass.simpleName}")
+      }
+    }
+
     OnDestroy {
       destroyed.set(true)
       if (coordinatorLazy.isInitialized()) coordinator.destroy()
+      // Closes every open document and its cache copy; searches end silently.
+      if (readerLazy.isInitialized()) reader.destroy()
       scope.cancel()
     }
 
@@ -114,16 +143,143 @@ class PdfEngineModule : Module() {
       }
     }
 
-    // T0.1b spike functions, registered in debug builds only. Removed when
-    // T2.1 defines the engine API. They share the PDFium thread with thumbnails.
-    if (BuildConfig.DEBUG) {
-      AsyncFunction("spikeRender") Coroutine { ->
-        withContext(PdfiumThread.dispatcher) { spike.render() }
-      }
+    // Promise-based so a document is never left registered when its result
+    // cannot be delivered (see openDocument).
+    AsyncFunction("open") { source: String, password: String?, openId: String, promise: Promise ->
+      openDocument(source, password, openId, promise)
+    }
 
-      AsyncFunction("spikeMerge") Coroutine { ->
-        withContext(PdfiumThread.dispatcher) { spike.merge() }
+    // Sync and never throws; unknown or finished ids are a no-op.
+    Function("cancelOpen") { openId: String ->
+      try {
+        if (!destroyed.get()) reader.cancelOpen(openId)
+      } catch (e: Exception) {
+        Log.w(TAG, "cancelOpen failed: ${e.javaClass.simpleName}")
       }
+    }
+
+    // Never rejects: close failures are logged inside the engine.
+    AsyncFunction("close") Coroutine { docId: String ->
+      if (readerLazy.isInitialized()) reader.close(docId)
+    }
+
+    AsyncFunction("getOutline") Coroutine { docId: String ->
+      reader.outline(docId).map { it.toMap() }
+    }
+
+    AsyncFunction("getPageText") Coroutine { docId: String, page: Int ->
+      reader.pageText(docId, page)
+    }
+
+    AsyncFunction("getTextRects") Coroutine { docId: String, page: Int ->
+      reader.textRects(docId, page).toMap()
+    }
+
+    // Resolves with the id before the search starts, so JS knows the id
+    // before the first event for it is sent.
+    AsyncFunction("search") { docId: String, query: String, options: SearchOptions, promise: Promise ->
+      startSearch(docId, query, options, promise)
+    }
+
+    // Sync and never throws; unknown or finished ids are a no-op.
+    Function("cancelSearch") { searchId: String ->
+      try {
+        if (readerLazy.isInitialized()) reader.cancelSearch(searchId)
+      } catch (e: Exception) {
+        Log.w(TAG, "cancelSearch failed: ${e.javaClass.simpleName}")
+      }
+    }
+  }
+
+  private fun openDocument(source: String, password: String?, openId: String, promise: Promise) {
+    if (destroyed.get()) {
+      rejectQuietly(promise, PdfEngineException(ErrorCode.CANCELLED, "The engine is shutting down"))
+      return
+    }
+    val settled = AtomicBoolean(false)
+    fun reject(error: CodedException) {
+      if (settled.compareAndSet(false, true)) rejectQuietly(promise, error)
+    }
+    val job = scope.launch {
+      val opened = try {
+        reader.open(source, password, openId)
+      } catch (e: CodedException) {
+        reject(e)
+        return@launch
+      } catch (e: CancellationException) {
+        reject(PdfEngineException(ErrorCode.CANCELLED, "Opening the document was cancelled"))
+        return@launch
+      } catch (e: Throwable) {
+        Log.w(TAG, "open failed: ${e.javaClass.simpleName}")
+        reject(CodedException(ERR_OPEN_FAILED, "The document could not be opened", null))
+        return@launch
+      }
+      // No suspension between open returning and this resolve. If it cannot
+      // be delivered (JS runtime gone), nobody holds the docId: close it.
+      val delivered = settled.compareAndSet(false, true) && try {
+        promise.resolve(opened.toMap())
+        true
+      } catch (e: Exception) {
+        Log.w(TAG, "Could not resolve open promise: ${e.javaClass.simpleName}")
+        false
+      }
+      if (!delivered) reader.close(opened.docId)
+    }
+    // A job cancelled before it ran (module torn down) never runs its body.
+    job.invokeOnCompletion { reject(PdfEngineException(ErrorCode.CANCELLED, "Opening the document was cancelled")) }
+  }
+
+  private fun startSearch(docId: String, query: String, options: SearchOptions, promise: Promise) {
+    try {
+      if (destroyed.get()) throw CodedException(ERR_DOC_NOT_OPEN, "The document is not open", null)
+      reader.startSearch(docId, query, options.matchCase, options.wholeWord) { searchId ->
+        promise.resolve(mapOf("searchId" to searchId))
+      }
+    } catch (e: CodedException) {
+      rejectQuietly(promise, e)
+    } catch (e: Exception) {
+      Log.w(TAG, "search failed to start: ${e.javaClass.simpleName}")
+      rejectQuietly(promise, CodedException(ERR_SEARCH_FAILED, "The search could not be started", null))
+    }
+  }
+
+  private fun rejectQuietly(promise: Promise, error: CodedException) {
+    try {
+      promise.reject(error)
+    } catch (e: Exception) {
+      Log.w(TAG, "Could not reject promise: ${e.javaClass.simpleName}")
+    }
+  }
+
+  // Events can outlive the JS runtime (reload); there is nobody to tell then.
+  private fun emit(name: String, body: Map<String, Any?>) {
+    if (destroyed.get()) return
+    try {
+      sendEvent(name, body)
+    } catch (e: Exception) {
+      Log.w(TAG, "Could not send $name: ${e.javaClass.simpleName}")
+    }
+  }
+
+  private val searchListener = object : SearchListener {
+    override fun onResult(searchId: String, page: Int, matches: List<List<NormalizedRect>>, rotation: Int) {
+      emit(
+        EVENT_SEARCH_RESULT,
+        mapOf(
+          "searchId" to searchId,
+          "page" to page,
+          "matches" to matches.map { rects -> rects.map { it.toMap() } },
+          "rotation" to rotation,
+        ),
+      )
+    }
+
+    override fun onProgress(searchId: String, pagesSearched: Int, pageCount: Int) {
+      emit(EVENT_SEARCH_PROGRESS, mapOf("searchId" to searchId, "pagesSearched" to pagesSearched, "pageCount" to pageCount))
+    }
+
+    override fun onDone(searchId: String, totalMatches: Int, errorCode: String?) {
+      emit(EVENT_SEARCH_DONE, mapOf("searchId" to searchId, "totalMatches" to totalMatches, "errorCode" to errorCode))
     }
   }
 
@@ -188,9 +344,12 @@ class PdfEngineModule : Module() {
   }
 
   companion object {
-    const val API_VERSION = 2
+    const val API_VERSION = 3
 
     private const val TAG = "PdfEngine"
+    private const val EVENT_SEARCH_RESULT = "onSearchResult"
+    private const val EVENT_SEARCH_PROGRESS = "onSearchProgress"
+    private const val EVENT_SEARCH_DONE = "onSearchDone"
     private const val TRIM_DEBOUNCE_MS = 2_000L
   }
 }

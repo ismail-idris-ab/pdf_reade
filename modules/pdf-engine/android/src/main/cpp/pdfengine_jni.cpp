@@ -1,17 +1,26 @@
 // Thin JNI layer over PDFium. PDFium is not thread-safe, so every entry point
 // takes the same global lock. Document handles are FPDF_DOCUMENT pointers
 // passed to Kotlin as jlong; Kotlin owns their lifetime and must close them.
+// Bookmark handles are pointers owned by their document and are only valid
+// while it is open.
+//
+// Every page, text page and search handle opened here is released before the
+// entry point returns, on every path (RAII holders below). Results are
+// returned in PDF user space; conversion to normalized page space happens in
+// Kotlin (PageGeometry).
 
 #include <android/bitmap.h>
 #include <jni.h>
 
-#include <cstdio>
+#include <limits>
 #include <mutex>
+#include <new>
 #include <string>
+#include <vector>
 
+#include "fpdf_doc.h"
 #include "fpdf_edit.h"
-#include "fpdf_ppo.h"
-#include "fpdf_save.h"
+#include "fpdf_text.h"
 #include "fpdfview.h"
 
 namespace {
@@ -21,6 +30,8 @@ bool g_initialized = false;
 
 constexpr const char* kIoException = "java/io/IOException";
 constexpr const char* kStateException = "java/lang/IllegalStateException";
+constexpr const char* kOutOfMemoryError = "java/lang/OutOfMemoryError";
+constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
 void throwJava(JNIEnv* env, const char* clazz, const std::string& message) {
   jclass cls = env->FindClass(clazz);
@@ -35,6 +46,14 @@ void throwPdfiumError(JNIEnv* env) {
   throwJava(env, kIoException, "PDFIUM_ERROR:" + std::to_string(FPDF_GetLastError()));
 }
 
+// A page or its text layer could not be loaded. FPDF_LoadPage does not set
+// FPDF_GetLastError, so report it as FPDF_ERR_PAGE for Kotlin to map.
+void throwPageError(JNIEnv* env) {
+  throwJava(env, kIoException, "PDFIUM_ERROR:" + std::to_string(FPDF_ERR_PAGE));
+}
+
+void throwOutOfMemory(JNIEnv* env) { throwJava(env, kOutOfMemoryError, "Native allocation failed"); }
+
 // Strings arrive as standard UTF-8 bytes encoded by Kotlin. JNI's own string
 // functions use modified UTF-8, which breaks paths containing emoji or other
 // characters outside the BMP. Returns false with a Java exception pending.
@@ -47,13 +66,73 @@ bool readUtf8(JNIEnv* env, jbyteArray bytes, std::string* out) {
 
 FPDF_DOCUMENT asDocument(jlong handle) { return reinterpret_cast<FPDF_DOCUMENT>(handle); }
 
-struct FileWriter : FPDF_FILEWRITE {
-  FILE* file;
+FPDF_BOOKMARK asBookmark(jlong handle) { return reinterpret_cast<FPDF_BOOKMARK>(handle); }
+
+class PageHolder {
+ public:
+  PageHolder(FPDF_DOCUMENT doc, int index) : page_(FPDF_LoadPage(doc, index)) {}
+  ~PageHolder() {
+    if (page_ != nullptr) FPDF_ClosePage(page_);
+  }
+  PageHolder(const PageHolder&) = delete;
+  PageHolder& operator=(const PageHolder&) = delete;
+  FPDF_PAGE get() const { return page_; }
+
+ private:
+  FPDF_PAGE page_;
 };
 
-int writeBlock(FPDF_FILEWRITE* self, const void* data, unsigned long size) {
-  auto* writer = static_cast<FileWriter*>(self);
-  return fwrite(data, 1, size, writer->file) == size ? 1 : 0;
+// Declare after the PageHolder it reads from so it is destroyed first.
+class TextPageHolder {
+ public:
+  explicit TextPageHolder(FPDF_PAGE page) : text_(page == nullptr ? nullptr : FPDFText_LoadPage(page)) {}
+  ~TextPageHolder() {
+    if (text_ != nullptr) FPDFText_ClosePage(text_);
+  }
+  TextPageHolder(const TextPageHolder&) = delete;
+  TextPageHolder& operator=(const TextPageHolder&) = delete;
+  FPDF_TEXTPAGE get() const { return text_; }
+
+ private:
+  FPDF_TEXTPAGE text_;
+};
+
+class SearchHolder {
+ public:
+  SearchHolder(FPDF_TEXTPAGE text, FPDF_WIDESTRING query, unsigned long flags)
+      : search_(FPDFText_FindStart(text, query, flags, 0)) {}
+  ~SearchHolder() {
+    if (search_ != nullptr) FPDFText_FindClose(search_);
+  }
+  SearchHolder(const SearchHolder&) = delete;
+  SearchHolder& operator=(const SearchHolder&) = delete;
+  FPDF_SCHHANDLE get() const { return search_; }
+
+ private:
+  FPDF_SCHHANDLE search_;
+};
+
+// Number of leading doubles appendPageGeometry writes.
+constexpr size_t kGeometryHeader = 5;
+
+// Appends [left, bottom, right, top, rotation] for a loaded page: the crop box
+// clipped to the media box in user space, then FPDFPage_GetRotation's quarter
+// turns (0-3, -1 unknown). False when PDFium has no box for the page.
+bool appendPageGeometry(FPDF_PAGE page, std::vector<double>* out) {
+  FS_RECTF box{};
+  if (!FPDF_GetPageBoundingBox(page, &box)) return false;
+  out->insert(out->end(), {box.left, box.bottom, box.right, box.top,
+                           static_cast<double>(FPDFPage_GetRotation(page))});
+  return true;
+}
+
+// Copies values into a new Java double[]; null with an exception pending on failure.
+jdoubleArray toJava(JNIEnv* env, const std::vector<double>& values) {
+  const auto size = static_cast<jsize>(values.size());
+  jdoubleArray result = env->NewDoubleArray(size);
+  if (result == nullptr) return nullptr;
+  if (size > 0) env->SetDoubleArrayRegion(result, 0, size, values.data());
+  return result;
 }
 
 }  // namespace
@@ -86,16 +165,6 @@ JNIEXPORT jlong JNICALL JNI_FN(nativeOpen)(JNIEnv* env, jobject, jbyteArray path
   return reinterpret_cast<jlong>(doc);
 }
 
-JNIEXPORT jlong JNICALL JNI_FN(nativeCreateDocument)(JNIEnv* env, jobject) {
-  std::lock_guard<std::mutex> guard(g_lock);
-  FPDF_DOCUMENT doc = FPDF_CreateNewDocument();
-  if (doc == nullptr) {
-    throwJava(env, kStateException, "FPDF_CreateNewDocument failed");
-    return 0;
-  }
-  return reinterpret_cast<jlong>(doc);
-}
-
 JNIEXPORT void JNICALL JNI_FN(nativeClose)(JNIEnv*, jobject, jlong handle) {
   std::lock_guard<std::mutex> guard(g_lock);
   if (handle != 0) FPDF_CloseDocument(asDocument(handle));
@@ -104,6 +173,12 @@ JNIEXPORT void JNICALL JNI_FN(nativeClose)(JNIEnv*, jobject, jlong handle) {
 JNIEXPORT jint JNICALL JNI_FN(nativePageCount)(JNIEnv*, jobject, jlong handle) {
   std::lock_guard<std::mutex> guard(g_lock);
   return FPDF_GetPageCount(asDocument(handle));
+}
+
+// -1 when the document has no security handler.
+JNIEXPORT jint JNICALL JNI_FN(nativeSecurityHandlerRevision)(JNIEnv*, jobject, jlong handle) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  return FPDF_GetSecurityHandlerRevision(asDocument(handle));
 }
 
 // Returns [widthPt, heightPt].
@@ -119,6 +194,35 @@ JNIEXPORT jfloatArray JNICALL JNI_FN(nativePageSize)(JNIEnv* env, jobject, jlong
   const jfloat values[2] = {size.width, size.height};
   env->SetFloatArrayRegion(result, 0, 2, values);
   return result;
+}
+
+// Displayed sizes of pages [start, start + count): two doubles per page,
+// [width, height] in points with /Rotate applied, NaN when the page has no
+// valid dictionary. Uses FPDF_GetPageSizeByIndexF, which (chromium/8076,
+// fpdf_view.cpp) builds a CPDF_Page whose constructor only computes
+// dimensions; unlike FPDF_LoadPage it never calls ParseContent, so this stays
+// cheap for any page count. Kotlin validates start and count.
+JNIEXPORT jdoubleArray JNICALL JNI_FN(nativePageSizes)(JNIEnv* env, jobject, jlong handle, jint start,
+                                                       jint count) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  if (count < 0) return toJava(env, {});
+  try {
+    std::vector<double> out;
+    out.reserve(static_cast<size_t>(count) * 2);
+    FPDF_DOCUMENT doc = asDocument(handle);
+    for (int index = start; index < start + count; ++index) {
+      FS_SIZEF size{};
+      if (FPDF_GetPageSizeByIndexF(doc, index, &size)) {
+        out.insert(out.end(), {size.width, size.height});
+      } else {
+        out.insert(out.end(), {kNaN, kNaN});
+      }
+    }
+    return toJava(env, out);
+  } catch (const std::bad_alloc&) {
+    throwOutOfMemory(env);
+    return nullptr;
+  }
 }
 
 // Renders the page scaled to sizeX x sizeY pixels, anchored at the top-left
@@ -140,7 +244,8 @@ JNIEXPORT void JNICALL JNI_FN(nativeRenderPage)(JNIEnv* env, jobject, jlong hand
   }
   FPDF_PAGE page = FPDF_LoadPage(asDocument(handle), index);
   if (page == nullptr) {
-    throwPdfiumError(env);
+    // FPDF_GetLastError is not set by FPDF_LoadPage and would be stale here.
+    throwPageError(env);
     return;
   }
   void* pixels = nullptr;
@@ -167,34 +272,184 @@ JNIEXPORT void JNICALL JNI_FN(nativeRenderPage)(JNIEnv* env, jobject, jlong hand
   FPDF_ClosePage(page);
 }
 
-// Appends every page of src to the end of dest.
-JNIEXPORT void JNICALL JNI_FN(nativeImportAllPages)(JNIEnv* env, jobject, jlong dest, jlong src) {
+// The Unicode value of every character of the page, by PDFium character
+// index (FPDFText_GetUnicode; 0 when PDFium has no mapping). Using the
+// per-index value keeps the text aligned with nativeTextBoxes, which
+// FPDFText_GetText does not guarantee.
+JNIEXPORT jintArray JNICALL JNI_FN(nativePageChars)(JNIEnv* env, jobject, jlong handle, jint index) {
   std::lock_guard<std::mutex> guard(g_lock);
-  FPDF_DOCUMENT destDoc = asDocument(dest);
-  if (!FPDF_ImportPages(destDoc, asDocument(src), nullptr, FPDF_GetPageCount(destDoc))) {
-    throwJava(env, kIoException, "FPDF_ImportPages failed");
+  PageHolder page(asDocument(handle), index);
+  TextPageHolder text(page.get());
+  if (text.get() == nullptr) {
+    throwPageError(env);
+    return nullptr;
+  }
+  const int count = FPDFText_CountChars(text.get());
+  if (count < 0) {
+    throwPageError(env);
+    return nullptr;
+  }
+  jintArray result = env->NewIntArray(count);
+  if (result == nullptr) return nullptr;
+  if (count == 0) return result;
+  jint* codes = env->GetIntArrayElements(result, nullptr);
+  if (codes == nullptr) return nullptr;
+  for (int i = 0; i < count; ++i) {
+    codes[i] = static_cast<jint>(FPDFText_GetUnicode(text.get(), i));
+  }
+  env->ReleaseIntArrayElements(result, codes, 0);
+  return result;
+}
+
+// The page geometry (see appendPageGeometry), then five doubles per
+// character: [unicode, left, top, right, bottom] in user space. Uses FPDFText_GetLooseCharBox: it spans the font's full ascent and
+// descent, so boxes on a line share a height and spaces get a width, which is
+// what selection hit-testing and highlighting need (GetCharBox is the tight
+// glyph outline: tiny for '.', empty for spaces). Characters PDFium generated
+// (inserted spaces, line breaks) or without a box get NaN coordinates.
+JNIEXPORT jdoubleArray JNICALL JNI_FN(nativeTextBoxes)(JNIEnv* env, jobject, jlong handle, jint index) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  PageHolder page(asDocument(handle), index);
+  TextPageHolder text(page.get());
+  if (text.get() == nullptr) {
+    throwPageError(env);
+    return nullptr;
+  }
+  const int count = FPDFText_CountChars(text.get());
+  if (count < 0) {
+    throwPageError(env);
+    return nullptr;
+  }
+  try {
+    std::vector<double> out;
+    out.reserve(kGeometryHeader + static_cast<size_t>(count) * 5);
+    if (!appendPageGeometry(page.get(), &out)) {
+      throwPageError(env);
+      return nullptr;
+    }
+    for (int i = 0; i < count; ++i) {
+      const double code = static_cast<double>(FPDFText_GetUnicode(text.get(), i));
+      FS_RECTF box{};
+      if (FPDFText_IsGenerated(text.get(), i) != 1 && FPDFText_GetLooseCharBox(text.get(), i, &box)) {
+        out.insert(out.end(), {code, box.left, box.top, box.right, box.bottom});
+      } else {
+        out.insert(out.end(), {code, kNaN, kNaN, kNaN, kNaN});
+      }
+    }
+    return toJava(env, out);
+  } catch (const std::bad_alloc&) {
+    throwOutOfMemory(env);
+    return nullptr;
   }
 }
 
-JNIEXPORT void JNICALL JNI_FN(nativeSave)(JNIEnv* env, jobject, jlong handle, jbyteArray path) {
+// Finds up to maxMatches occurrences of query (UTF-16, no terminator) on one
+// page. Layout: the page geometry (see appendPageGeometry), then [matchCount,
+// then per match: rectCount, then rectCount x
+// (left, top, right, bottom) in user space]. Rects come from
+// FPDFText_CountRects/GetRect over the match's character range, so a match
+// that wraps lines has several.
+JNIEXPORT jdoubleArray JNICALL JNI_FN(nativeSearchPage)(JNIEnv* env, jobject, jlong handle, jint index,
+                                                        jcharArray query, jint flags, jint maxMatches) {
   std::lock_guard<std::mutex> guard(g_lock);
-  std::string filePath;
-  if (!readUtf8(env, path, &filePath)) return;
-  FILE* file = fopen(filePath.c_str(), "wb");
-  if (file == nullptr) {
-    throwJava(env, kIoException, "Cannot open output file");
-    return;
+  try {
+    const jsize length = env->GetArrayLength(query);
+    // FPDF_WIDESTRING is NUL-terminated UTF-16LE; jchar is UTF-16 in native
+    // (little-endian on every Android ABI) byte order.
+    std::vector<FPDF_WCHAR> needle(static_cast<size_t>(length) + 1, 0);
+    env->GetCharArrayRegion(query, 0, length, reinterpret_cast<jchar*>(needle.data()));
+    if (env->ExceptionCheck()) return nullptr;
+
+    PageHolder page(asDocument(handle), index);
+    TextPageHolder text(page.get());
+    if (text.get() == nullptr) {
+      throwPageError(env);
+      return nullptr;
+    }
+    std::vector<double> out;
+    if (!appendPageGeometry(page.get(), &out)) {
+      throwPageError(env);
+      return nullptr;
+    }
+    out.push_back(0.0);
+    if (length == 0 || maxMatches <= 0 || FPDFText_CountChars(text.get()) <= 0) return toJava(env, out);
+    SearchHolder search(text.get(), needle.data(), static_cast<unsigned long>(flags));
+    if (search.get() == nullptr) return toJava(env, out);
+    int matches = 0;
+    while (matches < maxMatches && FPDFText_FindNext(search.get())) {
+      const int first = FPDFText_GetSchResultIndex(search.get());
+      const int chars = FPDFText_GetSchCount(search.get());
+      const int rects = chars > 0 ? FPDFText_CountRects(text.get(), first, chars) : 0;
+      out.push_back(static_cast<double>(rects > 0 ? rects : 0));
+      for (int r = 0; r < rects; ++r) {
+        double left = 0;
+        double top = 0;
+        double right = 0;
+        double bottom = 0;
+        FPDFText_GetRect(text.get(), r, &left, &top, &right, &bottom);
+        out.insert(out.end(), {left, top, right, bottom});
+      }
+      ++matches;
+    }
+    out[kGeometryHeader] = static_cast<double>(matches);
+    return toJava(env, out);
+  } catch (const std::bad_alloc&) {
+    throwOutOfMemory(env);
+    return nullptr;
   }
-  FileWriter writer{};
-  writer.version = 1;
-  writer.WriteBlock = writeBlock;
-  writer.file = file;
-  const bool saved = FPDF_SaveAsCopy(asDocument(handle), &writer, FPDF_NO_INCREMENTAL);
-  const bool closed = fclose(file) == 0;
-  if (!saved || !closed) {
-    remove(filePath.c_str());
-    throwJava(env, kIoException, "FPDF_SaveAsCopy failed");
+}
+
+// First child of bookmark (0 = the outline root), or 0 when there is none.
+JNIEXPORT jlong JNICALL JNI_FN(nativeBookmarkFirstChild)(JNIEnv*, jobject, jlong handle, jlong bookmark) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  return reinterpret_cast<jlong>(FPDFBookmark_GetFirstChild(asDocument(handle), asBookmark(bookmark)));
+}
+
+// Next sibling of bookmark, or 0. Malformed files can make this cycle; the
+// Kotlin walker tracks visited handles.
+JNIEXPORT jlong JNICALL JNI_FN(nativeBookmarkNextSibling)(JNIEnv*, jobject, jlong handle, jlong bookmark) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  if (bookmark == 0) return 0;
+  return reinterpret_cast<jlong>(FPDFBookmark_GetNextSibling(asDocument(handle), asBookmark(bookmark)));
+}
+
+// The bookmark title as UTF-16 code units (no terminator).
+JNIEXPORT jcharArray JNICALL JNI_FN(nativeBookmarkTitle)(JNIEnv* env, jobject, jlong bookmark) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  if (bookmark == 0) return env->NewCharArray(0);
+  try {
+    // Byte length including the two-byte NUL terminator.
+    const unsigned long bytes = FPDFBookmark_GetTitle(asBookmark(bookmark), nullptr, 0);
+    const unsigned long units = bytes / 2;
+    if (units <= 1) return env->NewCharArray(0);
+    std::vector<FPDF_WCHAR> buffer(units, 0);
+    FPDFBookmark_GetTitle(asBookmark(bookmark), buffer.data(), units * 2);
+    const auto length = static_cast<jsize>(units - 1);
+    jcharArray result = env->NewCharArray(length);
+    if (result == nullptr) return nullptr;
+    env->SetCharArrayRegion(result, 0, length, reinterpret_cast<const jchar*>(buffer.data()));
+    return result;
+  } catch (const std::bad_alloc&) {
+    throwOutOfMemory(env);
+    return nullptr;
   }
+}
+
+// 0-based page targeted by the bookmark's destination, or by its GoTo
+// action's destination; -1 when it has neither (URI, launch, remote GoTo...).
+JNIEXPORT jint JNICALL JNI_FN(nativeBookmarkPage)(JNIEnv*, jobject, jlong handle, jlong bookmark) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  if (bookmark == 0) return -1;
+  FPDF_DOCUMENT doc = asDocument(handle);
+  FPDF_DEST dest = FPDFBookmark_GetDest(doc, asBookmark(bookmark));
+  if (dest == nullptr) {
+    FPDF_ACTION action = FPDFBookmark_GetAction(asBookmark(bookmark));
+    if (action != nullptr && FPDFAction_GetType(action) == PDFACTION_GOTO) {
+      dest = FPDFAction_GetDest(doc, action);
+    }
+  }
+  if (dest == nullptr) return -1;
+  return FPDFDest_GetDestPageIndex(doc, dest);
 }
 
 }  // extern "C"
