@@ -33,7 +33,7 @@ beforeEach(() => {
 
 describe('engine thumbnail wrappers', () => {
   it('reports the v2 contract', () => {
-    expect(getPdfEngineApiVersion()).toBe(3);
+    expect(getPdfEngineApiVersion()).toBe(4);
   });
 
   it('passes the request through and normalises rejections to AppError', async () => {

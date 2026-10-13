@@ -27,11 +27,16 @@ function Tools() {
       <Text className="text-xs text-muted">
         {`pdf-engine v${getPdfEngineApiVersion()} · file-index v${getFileIndexApiVersion()} · secure-vault v${getSecureVaultApiVersion()}`}
       </Text>
-      <View className="mt-4">
+      <View className="mt-4 gap-2">
         <Button
           label="Design system"
           variant="secondary"
           onPress={() => router.push('/dev/design')}
+        />
+        <Button
+          label="Page view (fling test)"
+          variant="secondary"
+          onPress={() => router.push('/dev/pages')}
         />
       </View>
     </ScrollView>

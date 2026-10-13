@@ -123,8 +123,8 @@ export type PdfEngineEvents = {
   onSearchDone: (event: SearchDoneEvent) => void;
 };
 
-/** apiVersion reported by this contract. */
-export const PDF_ENGINE_API_VERSION = 3;
+/** apiVersion reported by this contract (4 adds the PdfPageView view). */
+export const PDF_ENGINE_API_VERSION = 4;
 
 declare class PdfEngineNativeModule extends NativeModule<PdfEngineEvents> {
   readonly apiVersion: number;

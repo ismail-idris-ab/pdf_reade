@@ -41,6 +41,20 @@ internal class ReaderDocument(
   /** Set on the PDFium thread right before the handle is closed. */
   @Volatile
   var closed = false
+
+  /** Set as soon as a close is requested (any thread), before the close task is queued. */
+  @Volatile
+  var closing = false
+    private set
+
+  /** Page-view renders using this document right now (registered on the PDFium thread). */
+  val renders: MutableSet<RenderCancelToken> = ConcurrentHashMap.newKeySet()
+
+  /** Marks the document closing and stops its page-view renders. Any thread. */
+  fun beginClosing() {
+    closing = true
+    renders.forEach { it.cancel(documentClosing = true) }
+  }
 }
 
 internal class OpenedReaderDocument(val docId: String, val sizes: List<PageSize>, val isEncrypted: Boolean) {
@@ -256,6 +270,7 @@ internal class ReaderEngine(
   /** Releases the document, cancels its searches and deletes its copy. Idempotent; never throws. */
   suspend fun close(docId: String) {
     cancelSearchesOf(docId)
+    registry.get(docId)?.beginClosing()
     try {
       withContext(NonCancellable) {
         val document = withContext(pdfiumDispatcher) {
@@ -276,6 +291,7 @@ internal class ReaderEngine(
     if (!destroyRequested.compareAndSet(false, true)) return
     searches.values.forEach { it.job.cancel() }
     synchronized(openLock) { opens.values.forEach { it.cancel() } }
+    registry.values().forEach { it.beginClosing() }
     teardownScope.launch {
       destroyed = true
       for (document in registry.removeAll()) {
@@ -353,6 +369,32 @@ internal class ReaderEngine(
 
     override fun page(item: Long): Int? =
       PdfiumNative.bookmarkPage(document.handle, item).takeIf { it in 0 until document.pageCount }
+  }
+
+  // endregion
+
+  // region page view
+
+  /**
+   * PDFium thread only (the caller is already running on [pdfiumDispatcher];
+   * nothing here suspends, so a result is never lost to cancellation).
+   * Runs [block] with the handle of an open document whose [page] exists,
+   * with [token] registered so closing the document cancels the render.
+   * Throws ERR_DOC_NOT_OPEN (unknown, closed or closing) or
+   * ERR_INVALID_ARGUMENT (page out of range).
+   */
+  fun <T> withRenderablePage(docId: String, page: Int, token: RenderCancelToken, block: (handle: Long) -> T): T {
+    val document = requireDocument(docId)
+    if (document.closing) throw docNotOpen()
+    requirePage(document, page)
+    document.renders.add(token)
+    try {
+      // A close that started before the add above did not see this token.
+      if (document.closing) token.cancel(documentClosing = true)
+      return block(document.handle)
+    } finally {
+      document.renders.remove(token)
+    }
   }
 
   // endregion

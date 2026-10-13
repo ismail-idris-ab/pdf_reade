@@ -87,3 +87,6 @@ internal object PdfiumErrors {
   fun openErrorCodeFor(pdfiumCode: Int, fileExists: Boolean, passwordGiven: Boolean): ErrorCode? =
     if (pdfiumCode == FPDF_ERR_PASSWORD && passwordGiven) ErrorCode.WRONG_PASSWORD else errorCodeFor(pdfiumCode, fileExists)
 }
+
+/** Non-shared: a page view render failed with no user-fixable cause (onRenderError code). */
+internal const val ERR_RENDER_FAILED = "ERR_RENDER_FAILED"

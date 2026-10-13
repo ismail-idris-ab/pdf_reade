@@ -55,7 +55,7 @@ beforeEach(() => {
 
 describe('document wrappers', () => {
   it('reports contract version 3', () => {
-    expect(getPdfEngineApiVersion()).toBe(3);
+    expect(getPdfEngineApiVersion()).toBe(4);
   });
 
   it('opens with a null password by default and passes one when given', async () => {

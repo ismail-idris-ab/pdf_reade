@@ -117,7 +117,7 @@ function createFakePdfEngine() {
   }
 
   return {
-    apiVersion: 3,
+    apiVersion: 4,
     setCancelIsNoop(value: boolean) {
       cancelIsNoop = value;
     },
@@ -237,5 +237,5 @@ function createFakePdfEngine() {
 }
 
 export function createFakePdfEngineModule() {
-  return { __esModule: true, PDF_ENGINE_API_VERSION: 3, default: createFakePdfEngine() };
+  return { __esModule: true, PDF_ENGINE_API_VERSION: 4, default: createFakePdfEngine() };
 }

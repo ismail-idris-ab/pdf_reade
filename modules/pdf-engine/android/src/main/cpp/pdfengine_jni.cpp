@@ -12,6 +12,7 @@
 #include <android/bitmap.h>
 #include <jni.h>
 
+#include <atomic>
 #include <limits>
 #include <mutex>
 #include <new>
@@ -20,6 +21,7 @@
 
 #include "fpdf_doc.h"
 #include "fpdf_edit.h"
+#include "fpdf_progressive.h"
 #include "fpdf_text.h"
 #include "fpdfview.h"
 
@@ -111,6 +113,85 @@ class SearchHolder {
  private:
   FPDF_SCHHANDLE search_;
 };
+
+// Cancellation flag for one progressive render. Created and freed from Kotlin
+// (RenderCancelToken), which guarantees a cancel never races with the free.
+// Set without g_lock: the render it stops is holding that lock.
+struct CancelToken {
+  std::atomic<bool> cancelled{false};
+};
+
+CancelToken* asToken(jlong handle) { return reinterpret_cast<CancelToken*>(handle); }
+
+bool isCancelled(const CancelToken* token) { return token->cancelled.load(std::memory_order_acquire); }
+
+// IFSDK_PAUSE callback: PDFium asks between batches of page objects whether to
+// stop; a cancelled token stops it.
+FPDF_BOOL needToPauseNow(IFSDK_PAUSE* pause) {
+  return isCancelled(static_cast<const CancelToken*>(pause->user)) ? 1 : 0;
+}
+
+// Keeps an Android bitmap's pixels locked until unlock() or destruction. JNI
+// calls must not run with a Java exception pending, so every path that throws
+// while locked calls unlock() first.
+class PixelLock {
+ public:
+  PixelLock(JNIEnv* env, jobject bitmap) : env_(env), bitmap_(bitmap) {
+    locked_ = AndroidBitmap_lockPixels(env, bitmap, &pixels_) == ANDROID_BITMAP_RESULT_SUCCESS;
+  }
+  ~PixelLock() { unlock(); }
+  void unlock() {
+    if (locked_) AndroidBitmap_unlockPixels(env_, bitmap_);
+    locked_ = false;
+  }
+  PixelLock(const PixelLock&) = delete;
+  PixelLock& operator=(const PixelLock&) = delete;
+  void* pixels() const { return locked_ ? pixels_ : nullptr; }
+
+ private:
+  JNIEnv* env_;
+  jobject bitmap_;
+  void* pixels_ = nullptr;
+  bool locked_ = false;
+};
+
+// Declare after the PixelLock whose pixels it wraps so it is destroyed first.
+class BitmapHolder {
+ public:
+  BitmapHolder(int width, int height, void* pixels, int stride)
+      : bitmap_(FPDFBitmap_CreateEx(width, height, FPDFBitmap_BGRA, pixels, stride)) {}
+  ~BitmapHolder() {
+    if (bitmap_ != nullptr) FPDFBitmap_Destroy(bitmap_);
+  }
+  BitmapHolder(const BitmapHolder&) = delete;
+  BitmapHolder& operator=(const BitmapHolder&) = delete;
+  FPDF_BITMAP get() const { return bitmap_; }
+
+ private:
+  FPDF_BITMAP bitmap_;
+};
+
+// Ends a progressive render (frees its context) before the page closes.
+// Declare after the PageHolder so it is destroyed first.
+class ProgressiveRenderCloser {
+ public:
+  explicit ProgressiveRenderCloser(FPDF_PAGE page) : page_(page) {}
+  ~ProgressiveRenderCloser() { FPDF_RenderPage_Close(page_); }
+  ProgressiveRenderCloser(const ProgressiveRenderCloser&) = delete;
+  ProgressiveRenderCloser& operator=(const ProgressiveRenderCloser&) = delete;
+
+ private:
+  FPDF_PAGE page_;
+};
+
+// Results of nativeRenderPageProgressive; mirrored in PdfiumNative.
+constexpr jint kRenderDone = 0;
+constexpr jint kRenderCancelled = 1;
+constexpr jint kRenderFailed = 2;
+
+// Shared by thumbnails and the page view: annotations drawn, RGBA byte order
+// (Android stores ARGB_8888 as RGBA bytes).
+constexpr int kRenderFlags = FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER;
 
 // Number of leading doubles appendPageGeometry writes.
 constexpr size_t kGeometryHeader = 5;
@@ -265,11 +346,87 @@ JNIEXPORT void JNICALL JNI_FN(nativeRenderPage)(JNIEnv* env, jobject, jlong hand
     return;
   }
   FPDFBitmap_FillRect(target, 0, 0, width, height, 0xFFFFFFFF);
-  // Android stores ARGB_8888 as RGBA bytes; ask PDFium for that order.
-  FPDF_RenderPageBitmap(target, page, 0, 0, sizeX, sizeY, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+  FPDF_RenderPageBitmap(target, page, 0, 0, sizeX, sizeY, 0, kRenderFlags);
   FPDFBitmap_Destroy(target);
   AndroidBitmap_unlockPixels(env, bitmap);
   FPDF_ClosePage(page);
+}
+
+JNIEXPORT jlong JNICALL JNI_FN(nativeNewCancelToken)(JNIEnv* env, jobject) {
+  auto* token = new (std::nothrow) CancelToken();
+  if (token == nullptr) throwOutOfMemory(env);
+  return reinterpret_cast<jlong>(token);
+}
+
+// No g_lock: it must reach a render that is holding the lock.
+JNIEXPORT void JNICALL JNI_FN(nativeCancelToken)(JNIEnv*, jobject, jlong token) {
+  if (token != 0) asToken(token)->cancelled.store(true, std::memory_order_release);
+}
+
+JNIEXPORT void JNICALL JNI_FN(nativeFreeCancelToken)(JNIEnv*, jobject, jlong token) {
+  delete asToken(token);
+}
+
+// Renders the page over an ARGB_8888 bitmap (sizeX x sizeY, top-left anchored,
+// white paper first) with PDFium's progressive renderer, which asks the token
+// between batches of page objects whether to stop. rotate is 0 because PDFium
+// adds the page's own /Rotate itself (CPDF_Page::GetDisplayMatrix), so the
+// output is in displayed orientation (checked by PageRenderServiceTest).
+// Returns kRenderDone, kRenderCancelled (stopped early; pixels are partial)
+// or kRenderFailed. A page that cannot be loaded throws
+// PDFIUM_ERROR:FPDF_ERR_PAGE. The page, progressive context, FPDF bitmap and
+// pixel lock are released on every path.
+JNIEXPORT jint JNICALL JNI_FN(nativeRenderPageProgressive)(JNIEnv* env, jobject, jlong handle, jint index,
+                                                           jobject bitmap, jint sizeX, jint sizeY,
+                                                           jlong token) {
+  std::lock_guard<std::mutex> guard(g_lock);
+  if (sizeX <= 0 || sizeY <= 0 || token == 0) {
+    throwJava(env, kStateException, "Invalid render request");
+    return kRenderFailed;
+  }
+  const CancelToken* cancel = asToken(token);
+  if (isCancelled(cancel)) return kRenderCancelled;
+  AndroidBitmapInfo info{};
+  if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS ||
+      info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+    throwJava(env, kStateException, "Bitmap must be ARGB_8888");
+    return kRenderFailed;
+  }
+  PageHolder page(asDocument(handle), index);
+  if (page.get() == nullptr) {
+    // FPDF_GetLastError is not set by FPDF_LoadPage and would be stale here.
+    throwPageError(env);
+    return kRenderFailed;
+  }
+  PixelLock pixels(env, bitmap);
+  if (pixels.pixels() == nullptr) {
+    throwJava(env, kStateException, "Cannot lock bitmap pixels");
+    return kRenderFailed;
+  }
+  const int width = static_cast<int>(info.width);
+  const int height = static_cast<int>(info.height);
+  BitmapHolder target(width, height, pixels.pixels(), static_cast<int>(info.stride));
+  if (target.get() == nullptr) {
+    pixels.unlock();
+    throwJava(env, kStateException, "FPDFBitmap_CreateEx failed");
+    return kRenderFailed;
+  }
+  FPDFBitmap_FillRect(target.get(), 0, 0, width, height, 0xFFFFFFFF);
+  IFSDK_PAUSE pause{};
+  pause.version = 1;
+  pause.NeedToPauseNow = needToPauseNow;
+  pause.user = const_cast<CancelToken*>(cancel);
+  ProgressiveRenderCloser closer(page.get());
+  int status =
+      FPDF_RenderPageBitmap_Start(target.get(), page.get(), 0, 0, sizeX, sizeY, 0, kRenderFlags, &pause);
+  // TOBECONTINUED only follows a pause, and pauses only follow a cancel; the
+  // check keeps a spurious pause from ending the render.
+  while (status == FPDF_RENDER_TOBECONTINUED && !isCancelled(cancel)) {
+    status = FPDF_RenderPage_Continue(page.get(), &pause);
+  }
+  if (status == FPDF_RENDER_DONE) return kRenderDone;
+  if (status == FPDF_RENDER_TOBECONTINUED) return kRenderCancelled;
+  return kRenderFailed;
 }
 
 // The Unicode value of every character of the page, by PDFium character

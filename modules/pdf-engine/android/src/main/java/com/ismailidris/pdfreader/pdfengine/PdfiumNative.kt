@@ -47,6 +47,27 @@ internal object PdfiumNative {
   fun renderPage(handle: Long, index: Int, bitmap: Bitmap, sizeX: Int = bitmap.width, sizeY: Int = bitmap.height) =
     nativeRenderPage(handle, index, bitmap, sizeX, sizeY)
 
+  /**
+   * Renders page [index] over the whole [bitmap] with PDFium's progressive
+   * renderer, stopping early once [cancelToken] (from [newCancelToken]) is
+   * cancelled. Returns [RENDER_DONE], [RENDER_CANCELLED] (pixels are partial)
+   * or [RENDER_FAILED]. The page's /Rotate is applied by PDFium.
+   */
+  fun renderPageProgressive(handle: Long, index: Int, bitmap: Bitmap, cancelToken: Long): Int =
+    nativeRenderPageProgressive(handle, index, bitmap, bitmap.width, bitmap.height, cancelToken)
+
+  /** A native cancel flag; free it exactly once with [freeCancelToken]. */
+  fun newCancelToken(): Long = nativeNewCancelToken()
+
+  /** Sets the flag. Takes no lock, so it reaches a render in progress. Any thread. */
+  fun cancelToken(token: Long) = nativeCancelToken(token)
+
+  fun freeCancelToken(token: Long) = nativeFreeCancelToken(token)
+
+  const val RENDER_DONE = 0
+  const val RENDER_CANCELLED = 1
+  const val RENDER_FAILED = 2
+
   /** Unicode value per PDFium character index (0 = unmapped). */
   fun pageChars(handle: Long, index: Int): IntArray = nativePageChars(handle, index)
 
@@ -78,6 +99,10 @@ internal object PdfiumNative {
   private external fun nativePageSize(handle: Long, index: Int): FloatArray
   private external fun nativePageSizes(handle: Long, start: Int, count: Int): DoubleArray
   private external fun nativeRenderPage(handle: Long, index: Int, bitmap: Bitmap, sizeX: Int, sizeY: Int)
+  private external fun nativeRenderPageProgressive(handle: Long, index: Int, bitmap: Bitmap, sizeX: Int, sizeY: Int, token: Long): Int
+  private external fun nativeNewCancelToken(): Long
+  private external fun nativeCancelToken(token: Long)
+  private external fun nativeFreeCancelToken(token: Long)
   private external fun nativePageChars(handle: Long, index: Int): IntArray
   private external fun nativeTextBoxes(handle: Long, index: Int): DoubleArray
   private external fun nativeSearchPage(handle: Long, index: Int, query: CharArray, flags: Int, maxMatches: Int): DoubleArray

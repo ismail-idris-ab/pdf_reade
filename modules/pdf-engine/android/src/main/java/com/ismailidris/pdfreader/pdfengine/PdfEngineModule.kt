@@ -1,5 +1,6 @@
 package com.ismailidris.pdfreader.pdfengine
 
+import android.app.ActivityManager
 import android.graphics.Bitmap
 import android.util.Log
 import expo.modules.kotlin.Promise
@@ -101,6 +102,15 @@ class PdfEngineModule : Module() {
   }
   private val reader by readerLazy
 
+  // Created by the first page view; its pool budget comes from the heap class.
+  private val pageRendererLazy = lazy {
+    // A view created during teardown gets no renderer (it reports ERR_RENDER_FAILED).
+    check(!destroyed.get()) { "The engine is shutting down" }
+    val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+    val memoryClass = context.getSystemService(ActivityManager::class.java)?.memoryClass ?: FALLBACK_MEMORY_CLASS_MB
+    PageRenderService({ reader }, memoryClass).also { it.registerMemoryCallbacks(context) }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("PdfEngine")
 
@@ -111,6 +121,27 @@ class PdfEngineModule : Module() {
     }
 
     Events(EVENT_SEARCH_RESULT, EVENT_SEARCH_PROGRESS, EVENT_SEARCH_DONE)
+
+    // The module's default view (JS: requireNativeView('PdfEngine')). Setters
+    // only stage values; OnViewDidUpdateProps applies them together.
+    View(PdfPageView::class) {
+      Prop("docId", "") { view: PdfPageView, value: String -> view.docId = value }
+      Prop("page", 0) { view: PdfPageView, value: Int -> view.page = value }
+      Prop("renderScale", 0.0) { view: PdfPageView, value: Double -> view.renderScale = value }
+      Prop("nightMode", false) { view: PdfPageView, value: Boolean -> view.nightMode = value }
+      Prop("sepia", false) { view: PdfPageView, value: Boolean -> view.sepia = value }
+      Prop("retryToken", 0.0) { view: PdfPageView, value: Double -> view.retryToken = value }
+
+      Events("onRendered", "onRenderError")
+
+      OnViewDidUpdateProps { view: PdfPageView ->
+        view.commitProps { pageRendererLazy.value }
+      }
+
+      OnViewDestroys { view: PdfPageView ->
+        view.destroy()
+      }
+    }
 
     // Creating the reader at start-up also deletes cache copies a previous
     // process left behind (on IO).
@@ -126,6 +157,8 @@ class PdfEngineModule : Module() {
       destroyed.set(true)
       if (coordinatorLazy.isInitialized()) coordinator.destroy()
       // Closes every open document and its cache copy; searches end silently.
+      // Page renders stop first; reader.destroy() also cancels any still running.
+      if (pageRendererLazy.isInitialized()) pageRendererLazy.value.destroy()
       if (readerLazy.isInitialized()) reader.destroy()
       scope.cancel()
     }
@@ -344,12 +377,15 @@ class PdfEngineModule : Module() {
   }
 
   companion object {
-    const val API_VERSION = 3
+    const val API_VERSION = 4
 
     private const val TAG = "PdfEngine"
     private const val EVENT_SEARCH_RESULT = "onSearchResult"
     private const val EVENT_SEARCH_PROGRESS = "onSearchProgress"
     private const val EVENT_SEARCH_DONE = "onSearchDone"
     private const val TRIM_DEBOUNCE_MS = 2_000L
+
+    // Used only if ActivityManager is unavailable: the low-end class (32 MB pool).
+    private const val FALLBACK_MEMORY_CLASS_MB = 128
   }
 }

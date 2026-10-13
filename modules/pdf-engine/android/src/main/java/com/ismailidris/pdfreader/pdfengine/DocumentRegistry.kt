@@ -22,6 +22,9 @@ internal class DocumentRegistry<T : Any>(private val newId: () -> String = { UUI
 
   fun get(id: String): T? = entries[id]
 
+  /** A snapshot of the current entries. */
+  fun values(): List<T> = entries.values.toList()
+
   /** The entry for [id], removed; null when unknown or already removed. */
   fun remove(id: String): T? = entries.remove(id)
 

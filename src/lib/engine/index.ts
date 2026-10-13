@@ -15,6 +15,14 @@ import PdfEngineModule, {
 } from '../../../modules/pdf-engine/src/PdfEngineModule';
 import { AppError, toAppError } from '@/lib/errors';
 
+export {
+  PdfPageView,
+  type PageRenderedEvent,
+  type PageRenderErrorEvent,
+  type PdfPageViewProps,
+} from '../../../modules/pdf-engine/src/PdfPageView';
+export { PageView, pageRenderError, type PageViewProps } from './PageView';
+
 export type {
   NormalizedRect,
   OpenedDocument,
