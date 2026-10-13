@@ -226,15 +226,30 @@ export const ha: Catalog = {
     sdCard: 'Katin SD',
   },
   intents: {
-    openNotFound: 'Ba a iya buɗe wannan fayil ba. Wataƙila an cire shi daga ɗakin karatunka.',
-    readerComingSoon:
-      'Cikakken na’urar karatu yana zuwa nan gaba kaɗan. Yanzu, wannan yana tabbatar kawai cewa fayil ɗin ya zo.',
     imageToPdfTitle: 'An karɓi hotuna',
     imageToPdfCount_one: 'Hoto {{count}} a shirye don mayar da shi PDF',
     imageToPdfCount_many: 'Hotuna {{count}} a shirye don mayar da su PDF',
     imageToPdfCount_other: 'Hotuna {{count}} a shirye don mayar da su PDF',
     imageToPdfComingSoon: 'Mayar da waɗannan zuwa PDF yana zuwa nan gaba kaɗan.',
     imageToPdfEmpty: 'Ba a karɓi wani hoto ba.',
+  },
+  reader: {
+    opening: 'Ana buɗe takarda',
+    pageLabel: 'Shafi {{page}} cikin {{total}}',
+    toggleControlsHint: 'Yana nuna ko ɓoye maɓallan karatu',
+    pageIndicator: '{{page}} / {{total}}',
+    jumpHint: 'Yana buɗe Je zuwa shafi',
+    jumpTitle: 'Je zuwa shafi',
+    jumpLabel: 'Lambar shafi, daga 1 zuwa {{total}}',
+    jumpRange: 'Shigar da lambar shafi daga 1 zuwa {{total}}.',
+    jumpConfirm: 'Je',
+    goToPage: 'Je zuwa shafi na {{page}}',
+    switchToHorizontal: 'Canja zuwa karatu shafi bayan shafi',
+    switchToVertical: 'Canja zuwa gungurawa a jere',
+    lockedMessage: 'Ba a iya buɗe fayilolin da ke da kalmar sirri tukuna ba.',
+    unsupportedMessage:
+      'A yanzu wannan manhaja tana karanta fayilolin PDF kawai. Za ka iya tura wannan fayil zuwa wata manhajar da ke buɗe shi.',
+    shareToApp: 'Tura zuwa wata manhaja',
   },
   settings: {
     title: 'Saituna',

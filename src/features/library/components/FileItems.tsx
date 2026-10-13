@@ -15,6 +15,7 @@ import { useTranslation } from '@/i18n';
 import { useTheme } from '@/theme';
 
 import { openFileActions } from '../../files/store';
+import { openReader } from '../../reader/navigation';
 import { useThumbnail, type ThumbnailState } from '../useThumbnail';
 import { FileThumb } from './FileThumb';
 
@@ -45,6 +46,11 @@ function useAccessibilityName(file: LibraryFile, details: string, state: Thumbna
 
 function useOpenActions(file: LibraryFile): () => void {
   return useCallback(() => openFileActions({ kind: 'file', file }), [file]);
+}
+
+/** Opens the file in the reader (which shows a message for types it cannot read yet). */
+function useOpenFile(fileId: number): () => void {
+  return useCallback(() => void openReader(fileId), [fileId]);
 }
 
 export type LongPressA11y = {
@@ -88,16 +94,14 @@ export function MoreButton({ name, onPress, testID }: MoreButtonProps) {
 
 type FileListRowProps = { file: LibraryFile; formatDetails: FormatDetails };
 
-/**
- * List view row. Opening a file arrives with the reader (T2.3); for now a
- * long-press or the ⋮ button opens the file's actions.
- */
+/** List view row: a tap opens the reader; a long-press or the ⋮ button opens the file's actions. */
 export const FileListRow = memo(function FileListRow({ file, formatDetails }: FileListRowProps) {
   const { t } = useTranslation();
   const state = useFileThumbnail(file, ROW_THUMB_WIDTH);
   const details = formatDetails(file);
   const label = useAccessibilityName(file, details, state);
   const openActions = useOpenActions(file);
+  const openFile = useOpenFile(file.id);
   const longPressA11y = useLongPressA11y(file.name, openActions);
   return (
     <View className="flex-row items-center pr-1">
@@ -105,6 +109,8 @@ export const FileListRow = memo(function FileListRow({ file, formatDetails }: Fi
         testID={`library-row-${file.id}`}
         accessibilityLabel={label}
         accessibilityHint={t('fileActions.longPressHint')}
+        accessibilityRole="button"
+        onPress={openFile}
         onLongPress={openActions}
         {...longPressA11y}
         className="min-h-14 flex-1 flex-row items-center gap-3 py-2 pl-4 active:bg-surface"
@@ -134,7 +140,8 @@ type FileTileProps = {
 
 /**
  * Thumbnail with the name below: grid cells and the Recent/Favorites cards.
- * The ⋮ button sits on the thumbnail's corner; long-press does the same.
+ * A tap opens the reader. The ⋮ button sits on the thumbnail's corner;
+ * long-press does the same.
  */
 export const FileTile = memo(function FileTile({
   file,
@@ -147,6 +154,7 @@ export const FileTile = memo(function FileTile({
   const label = useAccessibilityName(file, formatDetails(file), state);
   const nameStyle = useMemo(() => ({ width }), [width]);
   const openActions = useOpenActions(file);
+  const openFile = useOpenFile(file.id);
   const longPressA11y = useLongPressA11y(file.name, openActions);
   return (
     <View className="p-2">
@@ -154,6 +162,8 @@ export const FileTile = memo(function FileTile({
         testID={testID}
         accessibilityLabel={label}
         accessibilityHint={t('fileActions.longPressHint')}
+        accessibilityRole="button"
+        onPress={openFile}
         onLongPress={openActions}
         {...longPressA11y}
         className="items-center"

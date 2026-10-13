@@ -65,10 +65,11 @@ function ThemedStack() {
   // - Before onboarding only: onboarding.
   // - Unguarded: dev/* (dev tools, design gallery), intentionally reachable at
   //   any time in dev builds; in release builds each screen redirects to /.
-  //   open and image-to-pdf (T1.6) are unguarded too, deliberately: a user
-  //   who explicitly opened or shared a file with this app must land there
-  //   even before onboarding is done, and doing so must not mark onboarding
-  //   complete (useIntentRouter never calls completeOnboarding).
+  //   reader/[fileId] (T2.3) and image-to-pdf (T1.6) are unguarded too,
+  //   deliberately: a user who explicitly opened or shared a file with this
+  //   app (Open with / share) must land there even before onboarding is
+  //   done, and doing so must not mark onboarding complete
+  //   (useIntentRouter never calls completeOnboarding).
   // When the flag flips, expo-router drops the now-protected screen and lands
   // on the first available one, so there is no redirect to loop on; a deep
   // link to a protected route lands on the first available route instead.
@@ -86,7 +87,7 @@ function ThemedStack() {
       <Stack.Protected guard={!onboardingComplete}>
         <Stack.Screen name="onboarding" />
       </Stack.Protected>
-      <Stack.Screen name="open" />
+      <Stack.Screen name="reader/[fileId]" />
       <Stack.Screen name="image-to-pdf" />
     </Stack>
   );

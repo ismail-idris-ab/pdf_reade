@@ -72,8 +72,7 @@ function useFormatDetails(): FormatDetails {
  * type tab and source chip, searchable by name, as a list or a grid. With
  * the My Files chip (and no search) it browses the My Files folder tree:
  * folders first, then files, with a breadcrumb, New folder and Import.
- * Files open their actions sheet from ⋮ or a long-press; opening a file for
- * reading arrives with the reader (T2.3).
+ * A tap opens a file in the reader; ⋮ or a long-press opens its actions sheet.
  */
 export function LibraryScreen() {
   const insets = useSafeAreaInsets();

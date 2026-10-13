@@ -325,6 +325,18 @@ export function createFilesRepository(db: AppDatabase) {
       return db.select().from(files).where(eq(files.path, path)).get();
     },
 
+    /**
+     * The row a content:// URI now belongs to: the picked row stored under it,
+     * or, once that pick was folded into a scanned row (mergeContentDuplicates),
+     * the path row that kept it as its fallback `uri`.
+     */
+    getByUri(uri: string): FileRow | undefined {
+      return (
+        db.select().from(files).where(eq(files.path, uri)).get() ??
+        db.select().from(files).where(eq(files.uri, uri)).orderBy(asc(files.id)).limit(1).get()
+      );
+    },
+
     /** Newest first by modification time, optionally limited to one source. */
     list(options: { source?: FileSource; limit?: number; offset?: number } = {}): FileRow[] {
       const { source, limit = 100, offset = 0 } = options;

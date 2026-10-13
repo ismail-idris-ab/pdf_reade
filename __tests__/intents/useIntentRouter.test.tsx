@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe('useIntentRouter — cold start', () => {
-  it('reads the launch intent once and routes to /open', async () => {
+  it('reads the launch intent once and routes to the reader', async () => {
     native.setLaunchIntent(viewIntent('a'));
     native.copyContentUriToCache.mockResolvedValueOnce(document('/cache/a.pdf', 'a.pdf'));
 
@@ -61,7 +61,7 @@ describe('useIntentRouter — cold start', () => {
     expect(native.getLaunchIntent).toHaveBeenCalledTimes(1);
     const fileId = getRepositories().files.getByPath('/cache/a.pdf')?.id;
     expect(mockReplace).toHaveBeenCalledWith({
-      pathname: '/open',
+      pathname: '/reader/[fileId]',
       params: { fileId: String(fileId) },
     });
   });
@@ -106,7 +106,7 @@ describe('useIntentRouter — warm start', () => {
 
     const fileId = getRepositories().files.getByPath('/cache/warm.pdf')?.id;
     expect(mockReplace).toHaveBeenCalledWith({
-      pathname: '/open',
+      pathname: '/reader/[fileId]',
       params: { fileId: String(fileId) },
     });
   });
@@ -165,7 +165,7 @@ describe('useIntentRouter — warm start', () => {
       expect(mockReplace).toHaveBeenCalledWith('/');
     });
 
-    it('falls back to /open for the first file when onboarding is not complete yet', async () => {
+    it('falls back to the reader for the first file when onboarding is not complete yet', async () => {
       // The library route sits behind the onboarding guard; a user who just
       // handed over several files must not be bounced to onboarding and lose
       // them, so this opens the first file instead (see useIntentRouter).
@@ -184,7 +184,7 @@ describe('useIntentRouter — warm start', () => {
 
       const firstId = getRepositories().files.getByPath('/cache/a.pdf')?.id;
       expect(mockReplace).toHaveBeenCalledWith({
-        pathname: '/open',
+        pathname: '/reader/[fileId]',
         params: { fileId: String(firstId) },
       });
       // Still not onboarded: the bypass never marks onboarding complete.

@@ -6,6 +6,7 @@ import { useOnboardingStore } from '@/features/onboarding/store';
 import { reportError } from '@/lib/crash';
 import { getLaunchIntent, onIncomingIntent, type IncomingIntent } from '@/lib/files';
 
+import { readerHref } from '../reader/navigation';
 import { handleIncomingIntent } from './handleIncomingIntent';
 import { useReceivedImagesStore } from './store';
 import type { IntentRouteTarget } from './types';
@@ -13,7 +14,7 @@ import type { IntentRouteTarget } from './types';
 function routeTo(target: IntentRouteTarget): void {
   switch (target.type) {
     case 'open':
-      router.replace({ pathname: '/open', params: { fileId: String(target.fileId) } });
+      router.replace(readerHref(target.fileId));
       return;
     case 'library':
       // /index sits behind the onboarding guard; a user who just handed the
@@ -23,7 +24,7 @@ function routeTo(target: IntentRouteTarget): void {
       if (useOnboardingStore.getState().onboardingComplete) {
         router.replace('/');
       } else {
-        router.replace({ pathname: '/open', params: { fileId: String(target.firstFileId) } });
+        router.replace(readerHref(target.firstFileId));
       }
       return;
     case 'imageToPdf':

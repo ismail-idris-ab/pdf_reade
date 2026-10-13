@@ -37,6 +37,20 @@ describe('files repository', () => {
     expect(repos.files.getByPath(created.path)).toEqual(created);
   });
 
+  it('finds the row of a content:// URI: the picked row, or the path row it was folded into', () => {
+    const repos = setup();
+    const picked = repos.files.upsert(
+      newFile({ path: 'content://p/doc/1', uri: 'content://p/doc/1', source: 'device' }),
+    );
+    expect(repos.files.getByUri('content://p/doc/1')?.id).toBe(picked.id);
+
+    const scanned = repos.files.upsert(newFile());
+    repos.files.mergeContentDuplicates();
+    expect(repos.files.getById(picked.id)).toBeUndefined();
+    expect(repos.files.getByUri('content://p/doc/1')?.id).toBe(scanned.id);
+    expect(repos.files.getByUri('content://p/doc/unknown')).toBeUndefined();
+  });
+
   it('upsert by path refreshes metadata but keeps user state', () => {
     const repos = setup();
     const first = repos.files.upsert(newFile());

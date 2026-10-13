@@ -227,9 +227,6 @@ export const en = {
     sdCard: 'SD card',
   },
   intents: {
-    openNotFound: "This file couldn't be opened. It may have been removed from your library.",
-    readerComingSoon:
-      'The full reader is coming soon. For now, this just confirms the file arrived.',
     imageToPdfTitle: 'Images received',
     // Plural by `count` (CLDR: en and ha use one/other, fr also many).
     imageToPdfCount_one: '{{count}} image ready to turn into a PDF',
@@ -237,6 +234,24 @@ export const en = {
     imageToPdfCount_other: '{{count}} images ready to turn into a PDF',
     imageToPdfComingSoon: 'Turning these into a PDF is coming soon.',
     imageToPdfEmpty: 'No images were received.',
+  },
+  reader: {
+    opening: 'Opening document',
+    pageLabel: 'Page {{page}} of {{total}}',
+    toggleControlsHint: 'Shows or hides the reading controls',
+    pageIndicator: '{{page}} / {{total}}',
+    jumpHint: 'Opens Go to page',
+    jumpTitle: 'Go to page',
+    jumpLabel: 'Page number, 1 to {{total}}',
+    jumpRange: 'Enter a page number from 1 to {{total}}.',
+    jumpConfirm: 'Go',
+    goToPage: 'Go to page {{page}}',
+    switchToHorizontal: 'Switch to page-by-page reading',
+    switchToVertical: 'Switch to continuous scrolling',
+    lockedMessage: "Opening password-protected files isn't available yet.",
+    unsupportedMessage:
+      'This app reads PDF files only for now. You can share this file to another app that opens it.',
+    shareToApp: 'Share to another app',
   },
   settings: {
     title: 'Settings',

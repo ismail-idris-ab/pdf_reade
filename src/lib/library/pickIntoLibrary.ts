@@ -8,6 +8,10 @@ import { addPickedDocuments, type AddPickedDocumentsResult } from './index';
 export type PickIntoLibraryOptions = {
   now: () => number;
   fallbackName: string;
+  /** Types offered by the picker; defaults to every type the library lists. */
+  mimeTypes?: readonly string[];
+  /** Allow choosing several documents (default true). */
+  multiple?: boolean;
 };
 
 /**
@@ -19,9 +23,14 @@ export type PickIntoLibraryOptions = {
  */
 export async function pickIntoLibrary(
   repos: Repositories,
-  { now, fallbackName }: PickIntoLibraryOptions,
+  {
+    now,
+    fallbackName,
+    mimeTypes = DEFAULT_PICK_MIME_TYPES,
+    multiple = true,
+  }: PickIntoLibraryOptions,
 ): Promise<AddPickedDocumentsResult | null> {
-  const picked = await pickDocuments({ mimeTypes: DEFAULT_PICK_MIME_TYPES, multiple: true });
+  const picked = await pickDocuments({ mimeTypes, multiple });
   if (picked.length === 0) return null;
   // In use already: as a picked row, or as a scanned row's fallback uri.
   const alreadyKept = new Set(

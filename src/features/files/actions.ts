@@ -390,7 +390,7 @@ function holdsAllFilesAccess(): boolean {
  * with a fallback content:// `uri` (a pick merged into it) is read through
  * that instead. Picked rows always use their URI; My Files is app storage.
  */
-function readableSource(row: FileRow): string {
+export function readableSource(row: FileRow): string {
   if (isContentPath(row.path)) return row.path;
   if (
     row.uri !== null &&

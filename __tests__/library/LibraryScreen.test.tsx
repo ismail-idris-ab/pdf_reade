@@ -12,6 +12,7 @@ import { getRepositories } from '@/db/client';
 import type { NewFile } from '@/db/types';
 import { LibraryScreen } from '@/features/library/LibraryScreen';
 import { useLibraryPrefsStore } from '@/features/library/store';
+import { readerOpened, resetOpenReaderGuard } from '@/features/reader/navigation';
 import { clearThumbnailMemo } from '@/features/library/useThumbnail';
 import { useOnboardingStore } from '@/features/onboarding/store';
 import { formatDate } from '@/i18n';
@@ -112,6 +113,7 @@ beforeEach(() => {
   files.pickDocuments.mockImplementation(() => Promise.resolve([]));
   engine.reset();
   clearThumbnailMemo();
+  resetOpenReaderGuard();
   for (const entry of getRepositories().files.listIndexEntries()) {
     getRepositories().files.remove(entry.id);
   }
@@ -133,13 +135,12 @@ describe('LibraryScreen', () => {
     expect(
       screen.getByText(`1.5 MB · ${formatDate(Date.UTC(2026, 9, 2, 12), 'en')}`),
     ).toBeOnTheScreen();
-    // Rows do not open files until the reader exists; the only control on a
-    // row is its actions button.
+    // A row is two buttons: the row itself (opens the reader) and its actions.
     expect(
       screen
         .queryAllByRole('button', { name: /banana report/ })
         .map((node) => node.props.accessibilityLabel as string),
-    ).toEqual(['More actions for banana report.pdf']);
+    ).toEqual(['banana report.pdf, 3 KB · Oct 3, 2026', 'More actions for banana report.pdf']);
   });
 
   it('filters by type tab and by source chip', async () => {
@@ -343,5 +344,50 @@ describe('LibraryScreen', () => {
     await renderLibrary();
     await fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(router.push).toHaveBeenCalledWith('/settings');
+  });
+
+  it('opens a file in the reader with a tap, from the list and the grid (T2.3)', async () => {
+    const [banana, apple] = seed();
+    await renderLibrary();
+
+    await fireEvent.press(screen.getByTestId(`library-row-${banana?.id}`));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: '/reader/[fileId]',
+      params: { fileId: String(banana?.id) },
+    });
+
+    // Other types open too: the reader explains what it cannot show yet.
+    resetOpenReaderGuard();
+    await fireEvent.press(screen.getByTestId(`library-row-${apple?.id}`));
+    expect(router.push).toHaveBeenLastCalledWith({
+      pathname: '/reader/[fileId]',
+      params: { fileId: String(apple?.id) },
+    });
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Show as grid' }));
+    resetOpenReaderGuard();
+    await fireEvent.press(screen.getByTestId(`library-cell-${banana?.id}`));
+    expect(router.push).toHaveBeenCalledTimes(3);
+  });
+
+  it('opens one reader for a double tap', async () => {
+    const [banana, apple] = seed();
+    await renderLibrary();
+    await fireEvent.press(screen.getByTestId(`library-row-${banana?.id}`));
+    await fireEvent.press(screen.getByTestId(`library-row-${banana?.id}`));
+    await fireEvent.press(screen.getByTestId(`library-row-${apple?.id}`));
+    expect(router.push).toHaveBeenCalledTimes(1);
+
+    // Back from that reader: another file opens straight away.
+    readerOpened();
+    await fireEvent.press(screen.getByTestId(`library-row-${apple?.id}`));
+    expect(router.push).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps long-press for the actions sheet, without opening the reader', async () => {
+    const [banana] = seed();
+    await renderLibrary();
+    await fireEvent(screen.getByTestId(`library-row-${banana?.id}`), 'longPress');
+    expect(router.push).not.toHaveBeenCalled();
   });
 });

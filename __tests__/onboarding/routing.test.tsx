@@ -5,9 +5,10 @@ import { Text } from 'react-native';
 import RootLayout from '../../app/_layout';
 import ImageToPdfScreen from '../../app/image-to-pdf';
 import OnboardingScreen from '../../app/onboarding';
-import OpenScreen from '../../app/open';
+import ReaderRoute from '../../app/reader/[fileId]';
 import FileIndexModule from '../../modules/file-index/src/FileIndexModule';
 import type { FakeFileIndexModule } from '../files/fakeFileIndex';
+import { getRepositories } from '@/db/client';
 import { useOnboardingStore } from '@/features/onboarding/store';
 import { useAllFilesAccessStore } from '@/lib/files';
 import { isIndexing } from '@/lib/library';
@@ -15,6 +16,13 @@ import { isIndexing } from '@/lib/library';
 jest.mock('../../modules/file-index/src/FileIndexModule', () =>
   jest.requireActual('../files/fakeFileIndex').createFakeFileIndexModule(),
 );
+jest.mock('../../modules/pdf-engine/src/PdfEngineModule', () =>
+  jest.requireActual('../engine/fakePdfEngine').createFakePdfEngineModule(),
+);
+jest.mock('../../modules/pdf-engine/src/PdfPageView', () =>
+  jest.requireActual('../engine/fakePdfPageView').createFakePdfPageViewModule(),
+);
+jest.mock('expo-keep-awake', () => ({ useKeepAwake: jest.fn() }));
 jest.mock('../../global.css', () => ({}));
 jest.mock('drizzle-orm/expo-sqlite/migrator', () => ({
   useMigrations: () => ({ success: true, error: undefined }),
@@ -40,7 +48,7 @@ const routes = {
   _layout: RootLayout,
   index: Home,
   onboarding: OnboardingScreen,
-  open: OpenScreen,
+  'reader/[fileId]': ReaderRoute,
   'image-to-pdf': ImageToPdfScreen,
 };
 
@@ -118,8 +126,8 @@ describe('onboarding route guard', () => {
   });
 });
 
-describe('T1.6 incoming-intent routes bypass the onboarding guard', () => {
-  it('opens a document handed to the app at cold start, before onboarding, without completing it', async () => {
+describe('incoming-intent routes (T1.6, reader T2.3) bypass the onboarding guard', () => {
+  it('opens a document handed to the app at cold start in the reader, before onboarding, without completing it', async () => {
     useOnboardingStore.setState({ onboardingComplete: false });
     native.setLaunchIntent({
       action: 'view',
@@ -142,7 +150,8 @@ describe('T1.6 incoming-intent routes bypass the onboarding guard', () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
     });
 
-    expect(app.getPathname()).toBe('/open');
+    const fileId = getRepositories().files.getByPath('/cache/doc.pdf')?.id;
+    expect(app.getPathname()).toBe(`/reader/${fileId}`);
     expect(screen.getByText('doc.pdf')).toBeOnTheScreen();
     expect(useOnboardingStore.getState().onboardingComplete).toBe(false);
   });

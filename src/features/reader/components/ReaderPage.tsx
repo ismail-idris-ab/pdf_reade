@@ -1,0 +1,122 @@
+import { memo, useCallback, useState, type ReactNode } from 'react';
+import { Pressable, Text, View } from 'react-native';
+
+import { Button } from '@/components/ui';
+import { useTranslation } from '@/i18n';
+import { PageView } from '@/lib/engine';
+import { toRecoveryLabel, toUserMessage, type AppError, type AppErrorCode } from '@/lib/errors';
+
+import type { PageFrame } from '../layout';
+
+/** The displayed page's box inside the overlay slot, dp (rotation already applied). */
+export type PageOverlayLayout = { width: number; height: number };
+
+/**
+ * Renders content over one page, in a layer exactly covering the displayed
+ * page. Rectangles in normalized page space are placed with
+ * `normalizedRectToView` (overlayGeometry.ts). The layer passes touches it
+ * does not handle through to the page.
+ */
+export type RenderPageOverlay = (page: number, layout: PageOverlayLayout) => ReactNode;
+
+export type ReaderPageProps = {
+  docId: string;
+  page: number;
+  pageCount: number;
+  frame: PageFrame;
+  nightMode: boolean;
+  sepia: boolean;
+  onTap: () => void;
+  /**
+   * Whether a render error should be shown in the cell; false drops it (e.g.
+   * the document was closed under this view while the reader is closing).
+   */
+  acceptRenderError: (error: AppError) => boolean;
+  renderOverlay?: RenderPageOverlay;
+};
+
+type FailedRender = { page: number; code: AppErrorCode };
+
+/**
+ * One page cell of the reader list: the native page, the overlay slot, and an
+ * in-cell error with "Try again" when the page cannot be rendered. A tap
+ * toggles the reader chrome.
+ */
+export const ReaderPage = memo(function ReaderPage({
+  docId,
+  page,
+  pageCount,
+  frame,
+  nightMode,
+  sepia,
+  onTap,
+  acceptRenderError,
+  renderOverlay,
+}: ReaderPageProps) {
+  const { t } = useTranslation();
+  // FlashList recycles this cell across pages: an error or retry only counts
+  // while it belongs to the page the cell holds now.
+  const [failed, setFailed] = useState<FailedRender | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
+
+  const onRenderError = useCallback(
+    (error: AppError, failedPage: number) => {
+      if (!acceptRenderError(error)) return;
+      setFailed({ page: failedPage, code: error.code });
+    },
+    [acceptRenderError],
+  );
+  const onRendered = useCallback(() => setFailed(null), []);
+  const retry = useCallback(() => {
+    setFailed(null);
+    setRetryToken((value) => value + 1);
+  }, []);
+
+  const error = failed?.page === page ? failed : null;
+  const pageStyle = {
+    position: 'absolute' as const,
+    left: frame.left,
+    top: frame.top,
+    width: frame.pageWidth,
+    height: frame.pageHeight,
+  };
+
+  return (
+    <Pressable
+      testID={`reader-page-${page}`}
+      onPress={onTap}
+      accessibilityRole="button"
+      accessibilityLabel={t('reader.pageLabel', { page: page + 1, total: pageCount })}
+      accessibilityHint={t('reader.toggleControlsHint')}
+      style={{ width: frame.cellWidth, height: frame.cellHeight }}
+    >
+      <PageView
+        docId={docId}
+        page={page}
+        nightMode={nightMode}
+        sepia={sepia}
+        retryToken={retryToken}
+        onRendered={onRendered}
+        onRenderError={onRenderError}
+        style={pageStyle}
+      />
+      {renderOverlay ? (
+        <View testID={`reader-overlay-${page}`} pointerEvents="box-none" style={pageStyle}>
+          {renderOverlay(page, { width: frame.pageWidth, height: frame.pageHeight })}
+        </View>
+      ) : null}
+      {error ? (
+        <View
+          testID={`reader-page-error-${page}`}
+          style={pageStyle}
+          className="items-center justify-center gap-3 bg-surface px-6"
+        >
+          <Text className="w-full text-center text-base font-semibold text-foreground">
+            {toUserMessage(error.code).title}
+          </Text>
+          <Button label={toRecoveryLabel('retry')} variant="secondary" onPress={retry} />
+        </View>
+      ) : null}
+    </Pressable>
+  );
+});

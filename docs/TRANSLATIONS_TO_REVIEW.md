@@ -181,8 +181,6 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `details.pickedFile` | Picked file | Fayil da aka zaɓa | Fichier choisi | T1.4 |
 | `details.phoneStorage` | Phone storage | Ma’ajiyar waya | Stockage du téléphone | T1.4 |
 | `details.sdCard` | SD card | Katin SD | Carte SD | T1.4 |
-| `intents.openNotFound` | This file couldn't be opened. It may have been removed from your library. | Ba a iya buɗe wannan fayil ba. Wataƙila an cire shi daga ɗakin karatunka. | Ce fichier n’a pas pu être ouvert. Il a peut-être été retiré de votre bibliothèque. | T1.6 |
-| `intents.readerComingSoon` | The full reader is coming soon. For now, this just confirms the file arrived. | Cikakken na’urar karatu yana zuwa nan gaba kaɗan. Yanzu, wannan yana tabbatar kawai cewa fayil ɗin ya zo. | La liseuse complète arrive bientôt. Pour l’instant, ceci confirme seulement que le fichier est arrivé. | T1.6 |
 | `intents.imageToPdfTitle` | Images received | An karɓi hotuna | Images reçues | T1.6 |
 | `intents.imageToPdfCount_one` | {{count}} image ready to turn into a PDF | Hoto {{count}} a shirye don mayar da shi PDF | {{count}} image prête à devenir un PDF | T1.6 |
 | `intents.imageToPdfCount_many` | {{count}} images ready to turn into a PDF | Hotuna {{count}} a shirye don mayar da su PDF | {{count}} d’images prêtes à devenir un PDF | T1.6 |
@@ -199,3 +197,18 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `settings.themeOptions.sepia` | Sepia | Sepia | Sépia | T1.7 |
 | `settings.about` | About | Game da manhaja | À propos | T1.7 |
 | `settings.version` | Version | Siga | Version | T1.7 |
+| `reader.opening` | Opening document | Ana buɗe takarda | Ouverture du document | T2.3 |
+| `reader.pageLabel` | Page {{page}} of {{total}} | Shafi {{page}} cikin {{total}} | Page {{page}} sur {{total}} | T2.3 |
+| `reader.toggleControlsHint` | Shows or hides the reading controls | Yana nuna ko ɓoye maɓallan karatu | Affiche ou masque les commandes de lecture | T2.3 |
+| `reader.pageIndicator` | {{page}} / {{total}} | {{page}} / {{total}} | {{page}} / {{total}} | T2.3 |
+| `reader.jumpHint` | Opens Go to page | Yana buɗe Je zuwa shafi | Ouvre Aller à la page | T2.3 |
+| `reader.jumpTitle` | Go to page | Je zuwa shafi | Aller à la page | T2.3 |
+| `reader.jumpLabel` | Page number, 1 to {{total}} | Lambar shafi, daga 1 zuwa {{total}} | Numéro de page, de 1 à {{total}} | T2.3 |
+| `reader.jumpRange` | Enter a page number from 1 to {{total}}. | Shigar da lambar shafi daga 1 zuwa {{total}}. | Saisissez un numéro de page de 1 à {{total}}. | T2.3 |
+| `reader.jumpConfirm` | Go | Je | Aller | T2.3 |
+| `reader.goToPage` | Go to page {{page}} | Je zuwa shafi na {{page}} | Aller à la page {{page}} | T2.3 |
+| `reader.switchToHorizontal` | Switch to page-by-page reading | Canja zuwa karatu shafi bayan shafi | Passer à la lecture page par page | T2.3 |
+| `reader.switchToVertical` | Switch to continuous scrolling | Canja zuwa gungurawa a jere | Passer au défilement continu | T2.3 |
+| `reader.lockedMessage` | Opening password-protected files isn't available yet. | Ba a iya buɗe fayilolin da ke da kalmar sirri tukuna ba. | L’ouverture des fichiers protégés par mot de passe n’est pas encore disponible. | T2.3 |
+| `reader.unsupportedMessage` | This app reads PDF files only for now. You can share this file to another app that opens it. | A yanzu wannan manhaja tana karanta fayilolin PDF kawai. Za ka iya tura wannan fayil zuwa wata manhajar da ke buɗe shi. | Pour l’instant, cette application ne lit que les fichiers PDF. Vous pouvez partager ce fichier avec une autre application capable de l’ouvrir. | T2.3 |
+| `reader.shareToApp` | Share to another app | Tura zuwa wata manhaja | Partager avec une autre application | T2.3 |
