@@ -38,6 +38,21 @@ class ThumbnailRequest : Record {
   val widthPx: Double = 0.0
 }
 
+/** detailRegion prop: normalized to the view's displayed bounds, origin top-left. */
+class DetailRegionRecord : Record {
+  @Field
+  val x: Double = 0.0
+
+  @Field
+  val y: Double = 0.0
+
+  @Field
+  val width: Double = 0.0
+
+  @Field
+  val height: Double = 0.0
+}
+
 class SearchOptions : Record {
   @Field
   val matchCase: Boolean = false
@@ -131,8 +146,11 @@ class PdfEngineModule : Module() {
       Prop("nightMode", false) { view: PdfPageView, value: Boolean -> view.nightMode = value }
       Prop("sepia", false) { view: PdfPageView, value: Boolean -> view.sepia = value }
       Prop("retryToken", 0.0) { view: PdfPageView, value: Double -> view.retryToken = value }
+      Prop("detailRegion") { view: PdfPageView, value: DetailRegionRecord? ->
+        view.detailRegion = value?.let { NormalizedRegion(it.x, it.y, it.width, it.height) }
+      }
 
-      Events("onRendered", "onRenderError")
+      Events("onRendered", "onRenderError", "onDetailRendered")
 
       OnViewDidUpdateProps { view: PdfPageView ->
         view.commitProps { pageRendererLazy.value }

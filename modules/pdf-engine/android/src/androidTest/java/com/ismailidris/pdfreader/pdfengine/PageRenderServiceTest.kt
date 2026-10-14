@@ -40,9 +40,11 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.abs
 import kotlin.random.Random
 
 /**
@@ -204,6 +206,23 @@ class PageRenderServiceTest {
 
     override fun onRenderError(page: Int, code: String) {
       errors++
+    }
+
+    @Volatile var tiles = 0
+
+    @Volatile var tilesDropped = 0
+
+    override fun displayTile(tile: Bitmap?, covered: NormalizedRegion?, content: RenderPlan?) = Unit
+
+    @Volatile var lastTileWaitMs = 0L
+
+    override fun onDetailRendered(page: Int, region: NormalizedRegion, widthPx: Int, heightPx: Int, ms: Long, waitMs: Long) {
+      lastTileWaitMs = waitMs
+      tiles++
+    }
+
+    override fun onDetailDropped(code: String) {
+      tilesDropped++
     }
 
     override fun afterNextFrames(block: () -> Unit) = FrameDeferral.afterNextFrames(block)
@@ -398,10 +417,10 @@ class PageRenderServiceTest {
   @Test
   fun overCapScaleIsLoweredAndReported() {
     val opened = open(write("a4.pdf") { it.textPage("cap") })
-    // 8 MB budget: 4 MB per bitmap = 1 Mi pixels.
+    // 8 MB budget: 2 MB per page bitmap = 512 Ki pixels.
     val service = service(budgetBytes = 8L * 1024 * 1024)
     val plan = PageRenderMath.plan(1080, 1528, 2.625f, 2.625 * 5, service.caps)!!
-    assertTrue("plan ${plan.widthPx}x${plan.heightPx}", plan.pixels <= 1024L * 1024)
+    assertTrue("plan ${plan.widthPx}x${plan.heightPx}", plan.pixels <= 512L * 1024)
     val result = rendered(render(service, RenderSpec(opened.docId, 0, plan)))
     assertEquals(plan.widthPx, result.widthPx)
     assertEquals(plan.heightPx, result.heightPx)
@@ -602,6 +621,242 @@ class PageRenderServiceTest {
     assertTrue(started.await(10, TimeUnit.SECONDS))
     return job
   }
+
+  // region detail tiles
+
+  /** Share of pixels whose channels all differ by at most [tolerance]. */
+  /** Compares only the tile's [content] window (the rest of its 64 px bucket is never drawn). */
+  private fun matchRatio(tile: Bitmap, content: RenderPlan, full: Bitmap, offsetX: Int, offsetY: Int, tolerance: Int = 8): Double {
+    var same = 0
+    for (y in 0 until content.heightPx) {
+      for (x in 0 until content.widthPx) {
+        val a = tile.getPixel(x, y)
+        val b = full.getPixel(x + offsetX, y + offsetY)
+        if (abs(Color.red(a) - Color.red(b)) <= tolerance && abs(Color.green(a) - Color.green(b)) <= tolerance &&
+          abs(Color.blue(a) - Color.blue(b)) <= tolerance
+        ) {
+          same++
+        }
+      }
+    }
+    return same.toDouble() / content.pixels
+  }
+
+  private fun assertTileMatchesFull(service: PageRenderService, docId: String, page: Int, viewW: Int, viewH: Int, region: NormalizedRegion) {
+    val roomy = RenderCaps(maxPixels = 100_000_000L, maxSide = 100_000)
+    val plan = PageRenderMath.tilePlan(viewW, viewH, 1f, 1.0, region, roomy)!!
+    val full = rendered(render(service, RenderSpec(docId, page, RenderPlan(viewW, viewH))))
+    val tile = rendered(render(service, RenderSpec(docId, page, plan.bitmap, plan.window)))
+    assertEquals(plan.bitmap.widthPx, tile.bitmap.width)
+    val ratio = matchRatio(tile.bitmap, plan.tile, full.bitmap, -plan.window.startX, -plan.window.startY)
+    Log.i(BENCH_TAG, "tile vs full render: ${"%.4f".format(ratio * 100)}% of pixels within tolerance")
+    assertTrue("only ${ratio * 100}% of tile pixels match the full render", ratio >= 0.995)
+    service.release(full.bitmap)
+    service.release(tile.bitmap)
+  }
+
+  @Test
+  fun tileMatchesTheSameAreaOfAFullRender() {
+    val opened = open(
+      write("tile.pdf") { document ->
+        document.textPage("Tile")
+        document.markerPage()
+      },
+    )
+    val service = service()
+    assertTileMatchesFull(service, opened.docId, 0, 900, 1273, NormalizedRegion(0.3, 0.4, 0.3, 0.2))
+    assertTileMatchesFull(service, opened.docId, 0, 900, 1273, NormalizedRegion(0.0, 0.0, 0.5, 0.5))
+    assertTileMatchesFull(service, opened.docId, 1, 612, 792, NormalizedRegion(0.05, 0.05, 0.2, 0.2))
+  }
+
+  @Test
+  fun tileOnARotatedPageIsInDisplayedSpace() {
+    val opened = open(write("rotated-tile.pdf") { it.markerPage(rotation = 90) })
+    val service = service()
+    // Displayed 792 x 612: the marker sits top-right (x 692..792, y 0..100).
+    val region = NormalizedRegion(0.8, 0.0, 0.2, 0.25)
+    assertTileMatchesFull(service, opened.docId, 0, 792, 612, region)
+    val plan = PageRenderMath.tilePlan(792, 612, 1f, 1.0, region, service.tileCaps)!!
+    val tile = rendered(render(service, RenderSpec(opened.docId, 0, plan.bitmap, plan.window)))
+    assertTrue("marker in the tile's top-right", isDark(tile.bitmap.getPixel(plan.tile.widthPx - 30, 30)))
+    assertTrue(isLight(tile.bitmap.getPixel(10, plan.tile.heightPx - 10)))
+    service.release(tile.bitmap)
+  }
+
+  @Test
+  fun tileRenderCancelsEarly() {
+    val opened = open(heavy())
+    val service = service()
+    val plan = PageRenderMath.tilePlan(2448, 3168, 1f, 1.0, NormalizedRegion(0.25, 0.25, 0.5, 0.5), service.tileCaps)!!
+    val spec = RenderSpec(opened.docId, 0, plan.bitmap, plan.window)
+    val full = rendered(render(service, spec))
+    service.release(full.bitmap)
+    val started = CountDownLatch(1)
+    service.beforeRenderForTest = { started.countDown() }
+    val handle = service.render(spec) {}
+    assertTrue(started.await(30, TimeUnit.SECONDS))
+    service.beforeRenderForTest = null
+    SystemClock.sleep(full.ms / 5)
+    val cancelAt = SystemClock.elapsedRealtime()
+    handle.cancel()
+    awaitCondition("the cancelled tile never went back") { service.pool.stats().inUseCount == 0 }
+    val stopMs = SystemClock.elapsedRealtime() - cancelAt
+    Log.i(BENCH_TAG, "heavy tile ${plan.tile.widthPx}x${plan.tile.heightPx}: full ${full.ms} ms, cancel stopped in $stopMs ms")
+    assertTrue("cancel took $stopMs ms of ${full.ms} ms", stopMs < full.ms / 2 + 50)
+  }
+
+  @Test
+  fun pannedTilesReuseTheSameBucketedBitmap() {
+    val opened = open(write("pan.pdf") { it.textPage("Pan") })
+    val service = service()
+    val view = ViewSize(4320, 6112, 2.625f)
+    var previous: Bitmap? = null
+    for (step in 0 until 5) {
+      val region = NormalizedRegion(0.1 + step * 0.0007, 0.2 + step * 0.0011, 0.25, 0.39)
+      val plan = PageRenderMath.tilePlan(view.widthPx, view.heightPx, view.density, 2.625, region, service.tileCaps)!!
+      val tile = rendered(render(service, RenderSpec(opened.docId, 0, plan.bitmap, plan.window)))
+      previous?.let { assertTrue("pan step $step reused the pooled tile", it === tile.bitmap) }
+      previous = tile.bitmap
+      service.release(tile.bitmap)
+    }
+    val stats = service.pool.stats()
+    assertEquals(1, stats.allocations)
+    assertEquals(4, stats.reuses)
+  }
+
+  /**
+   * The 128 MB-class budget (32 MB) holds two zoomed views' page bitmaps and
+   * three tiles (two shown, one replacing): pool high-water stays in budget.
+   */
+  @Test
+  fun twoZoomedViewsAndThreeTilesFitALowEndBudget() {
+    val opened = open(write("zoom.pdf") { document -> repeat(2) { document.textPage("Zoom $it") } })
+    val service = service(budgetBytes = 32L * 1024 * 1024)
+    service.pool.resetHighWater()
+    val host = CountingHost()
+    // 3× zoom on a 720 x 1600 screen (density 2): 2160 x 3056 px views.
+    val zoomedSize = ViewSize(2160, 3056, 2f)
+    val viewport = NormalizedRegion(0.0, 0.0, 720.0 / 2160, 1600.0 / 3056)
+    val controllers = ArrayList<PageRenderController<Bitmap>>()
+    instrumentation.runOnMainSync {
+      repeat(2) { i ->
+        val c = PageRenderController(service, host)
+        c.update(PageViewProps(opened.docId, i, 2.0, detailRegion = viewport), zoomedSize)
+        controllers.add(c)
+      }
+    }
+    awaitCondition("first tiles never arrived") { host.tiles == 2 }
+    instrumentation.runOnMainSync {
+      controllers[0].update(
+        PageViewProps(opened.docId, 0, 2.0, detailRegion = NormalizedRegion(0.5, 0.4, 720.0 / 2160, 1600.0 / 3056)),
+        zoomedSize,
+      )
+    }
+    awaitCondition("replacement tile never arrived") { host.tiles == 3 }
+    val stats = service.pool.stats()
+    Log.i(BENCH_TAG, "32 MB budget, 2 zoomed pages + 3 tiles: high-water ${stats.highWaterBytes / 1024} KB, $stats")
+    assertTrue("high-water ${stats.highWaterBytes}", stats.highWaterBytes <= service.pool.budgetBytes)
+    assertEquals(0, host.errors)
+    assertEquals(0, host.tilesDropped)
+    instrumentation.runOnMainSync { controllers.forEach { it.dispose() } }
+    awaitCondition("bitmaps kept") {
+      instrumentation.waitForIdleSync()
+      service.pool.stats().inUseCount == 0
+    }
+  }
+
+  @Test
+  fun measureTileRenderAt4x() {
+    val opened = open(write("book4x.pdf") { document -> repeat(6) { document.textPage("Page $it") } })
+    val density = 2.625f
+    // 4× zoom by layout on a 1080 x 2400 px phone: the page view is 4320 px wide.
+    val view = ViewSize(4320, Math.round(4320 * 842f / 595f), density)
+    val viewport = NormalizedRegion(0.375, 0.3, 1080.0 / view.widthPx, 2400.0 / view.heightPx)
+    for ((label, budget) in listOf("device" to deviceBudget(), "32MB" to 32L * 1024 * 1024)) {
+      val service = service(budgetBytes = budget)
+      assertTrue(PageRenderMath.isCapped(view.widthPx, view.heightPx, density, density.toDouble(), service.caps))
+      val plan = PageRenderMath.tilePlan(view.widthPx, view.heightPx, density, density.toDouble(), viewport, service.tileCaps)!!
+      val times = ArrayList<Long>()
+      repeat(6) { page ->
+        val tile = rendered(render(service, RenderSpec(opened.docId, page, plan.bitmap, plan.window)))
+        times.add(tile.ms)
+        service.release(tile.bitmap)
+      }
+      val steady = times.drop(1).sorted()
+      Log.i(
+        BENCH_TAG,
+        "4x tile ($label budget ${budget / (1024 * 1024)} MB): ${plan.tile.widthPx}x${plan.tile.heightPx} px of a " +
+          "${plan.window.pageWidthPx}x${plan.window.pageHeightPx} page; first ${times[0]} ms, " +
+          "median ${steady[steady.size / 2]} ms, max ${steady.last()} ms",
+      )
+    }
+  }
+
+  /** Delegates to the service and records each finished render's queue wait. */
+  private class WaitRecorder(private val inner: PageRenderService) : PageRenderBackend<Bitmap> {
+    val waits = ConcurrentHashMap<String, Long>()
+
+    override val caps: RenderCaps get() = inner.caps
+    override val backdropCaps: RenderCaps get() = inner.backdropCaps
+    override val tileCaps: RenderCaps get() = inner.tileCaps
+
+    override fun render(spec: RenderSpec, onDone: (RenderOutcome<Bitmap>) -> Unit): RenderCancellable =
+      inner.render(spec) { outcome ->
+        if (outcome is RenderOutcome.Rendered) {
+          waits["${spec.page}:${if (spec.window == null) "page" else "tile"}"] = outcome.waitMs
+        }
+        onDone(outcome)
+      }
+
+    override fun release(bitmap: Bitmap) = inner.release(bitmap)
+  }
+
+  /**
+   * Measurement for the FIFO vs LIFO question: a fling over 60 pages while
+   * zoomed (each binding asks for a page bitmap and a tile), 7 recycled cells,
+   * one page every 16 ms. Reports how long the pages left on screen waited in
+   * the PDFium queue.
+   */
+  @Test
+  fun measureQueueWaitDuringAZoomedFling() {
+    val opened = open(write("fling.pdf") { document -> repeat(60) { document.textPage("Fling $it") } })
+    val service = service()
+    val recorder = WaitRecorder(service)
+    val host = CountingHost()
+    // 2× zoom on 1080 px: 2160 x 3056 views, capped on this device, so every binding wants a tile.
+    val zoomedSize = ViewSize(2160, 3056, 2.625f)
+    val region = NormalizedRegion(0.25, 0.25, 0.5, 0.39)
+    val cells = ArrayList<PageRenderController<Bitmap>>()
+    instrumentation.runOnMainSync { repeat(7) { cells.add(PageRenderController(recorder, host)) } }
+    val flingStart = SystemClock.elapsedRealtime()
+    for (page in 0 until 60) {
+      instrumentation.runOnMainSync {
+        cells[page % 7].update(PageViewProps(opened.docId, page, 2.625, detailRegion = region), zoomedSize)
+      }
+      SystemClock.sleep(16)
+    }
+    val flingEnd = SystemClock.elapsedRealtime()
+    awaitCondition("fling never settled", timeoutMs = 60_000) {
+      var busy = false
+      instrumentation.runOnMainSync { busy = cells.any { it.isRendering || it.isRenderingTile } }
+      !busy
+    }
+    val settled = SystemClock.elapsedRealtime() - flingEnd
+    // The last 7 pages are the ones bound when the fling stops.
+    val onScreen = 53 until 60
+    val pageWaits = onScreen.map { recorder.waits["$it:page"] ?: -1 }
+    val tileWaits = onScreen.map { recorder.waits["$it:tile"] ?: -1 }
+    Log.i(
+      BENCH_TAG,
+      "zoomed fling 60 pages in ${flingEnd - flingStart} ms (FIFO): final cells page waits $pageWaits ms, " +
+        "tile waits $tileWaits ms; settled $settled ms after the fling; " +
+        "${host.renders} pages + ${host.tiles} tiles rendered",
+    )
+    instrumentation.runOnMainSync { cells.forEach { it.dispose() } }
+    assertEquals(0, host.errors)
+  }
+
+  // endregion
 
   companion object {
     private const val BENCH_TAG = "PdfEngineBench"

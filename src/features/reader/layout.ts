@@ -145,6 +145,18 @@ export function pageAtScroll(
   viewLength: number,
   horizontal: boolean,
 ): number | null {
+  return mostVisiblePage(
+    visibleSpans(list, horizontal),
+    offset - list.getFirstItemOffset(),
+    viewLength,
+  );
+}
+
+/**
+ * The list's own spans of the visible items along its scroll axis, plus one
+ * item on each side (item space: the header is not included).
+ */
+export function visibleSpans(list: VisibleLayoutSource, horizontal: boolean): ItemSpan[] {
   const { startIndex, endIndex } = list.computeVisibleIndices();
   const spans: ItemSpan[] = [];
   for (let index = Math.max(0, startIndex - 1); index <= endIndex + 1; index += 1) {
@@ -156,5 +168,5 @@ export function pageAtScroll(
       length: horizontal ? layout.width : layout.height,
     });
   }
-  return mostVisiblePage(spans, offset - list.getFirstItemOffset(), viewLength);
+  return spans;
 }

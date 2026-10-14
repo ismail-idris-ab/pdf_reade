@@ -48,13 +48,24 @@ internal object PdfiumNative {
     nativeRenderPage(handle, index, bitmap, sizeX, sizeY)
 
   /**
-   * Renders page [index] over the whole [bitmap] with PDFium's progressive
-   * renderer, stopping early once [cancelToken] (from [newCancelToken]) is
-   * cancelled. Returns [RENDER_DONE], [RENDER_CANCELLED] (pixels are partial)
-   * or [RENDER_FAILED]. The page's /Rotate is applied by PDFium.
+   * Renders page [index] with PDFium's progressive renderer, stopping early
+   * once [cancelToken] (from [newCancelToken]) is cancelled. The page is
+   * scaled to [sizeX] x [sizeY] px with its top-left at ([startX], [startY])
+   * in [bitmap] and clipped to it; the defaults fill the bitmap with the whole
+   * page, a negative start renders a window of a larger page image (detail
+   * tile). Returns [RENDER_DONE], [RENDER_CANCELLED] (pixels are partial) or
+   * [RENDER_FAILED]. The page's /Rotate is applied by PDFium.
    */
-  fun renderPageProgressive(handle: Long, index: Int, bitmap: Bitmap, cancelToken: Long): Int =
-    nativeRenderPageProgressive(handle, index, bitmap, bitmap.width, bitmap.height, cancelToken)
+  fun renderPageProgressive(
+    handle: Long,
+    index: Int,
+    bitmap: Bitmap,
+    cancelToken: Long,
+    startX: Int = 0,
+    startY: Int = 0,
+    sizeX: Int = bitmap.width,
+    sizeY: Int = bitmap.height,
+  ): Int = nativeRenderPageProgressive(handle, index, bitmap, startX, startY, sizeX, sizeY, cancelToken)
 
   /** A native cancel flag; free it exactly once with [freeCancelToken]. */
   fun newCancelToken(): Long = nativeNewCancelToken()
@@ -99,7 +110,16 @@ internal object PdfiumNative {
   private external fun nativePageSize(handle: Long, index: Int): FloatArray
   private external fun nativePageSizes(handle: Long, start: Int, count: Int): DoubleArray
   private external fun nativeRenderPage(handle: Long, index: Int, bitmap: Bitmap, sizeX: Int, sizeY: Int)
-  private external fun nativeRenderPageProgressive(handle: Long, index: Int, bitmap: Bitmap, sizeX: Int, sizeY: Int, token: Long): Int
+  private external fun nativeRenderPageProgressive(
+    handle: Long,
+    index: Int,
+    bitmap: Bitmap,
+    startX: Int,
+    startY: Int,
+    sizeX: Int,
+    sizeY: Int,
+    token: Long,
+  ): Int
   private external fun nativeNewCancelToken(): Long
   private external fun nativeCancelToken(token: Long)
   private external fun nativeFreeCancelToken(token: Long)

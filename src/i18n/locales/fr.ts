@@ -257,6 +257,8 @@ export const fr: Catalog = {
     unsupportedMessage:
       'Pour l’instant, cette application ne lit que les fichiers PDF. Vous pouvez partager ce fichier avec une autre application capable de l’ouvrir.',
     shareToApp: 'Partager avec une autre application',
+    zoomIn: 'Zoom avant',
+    zoomOut: 'Zoom arrière',
   },
   settings: {
     title: 'Paramètres',

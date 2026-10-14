@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.util.Log
 import android.os.Handler
 import android.os.Looper
@@ -25,6 +26,7 @@ import expo.modules.kotlin.views.ExpoView
 class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
   private val onRendered by EventDispatcher()
   private val onRenderError by EventDispatcher()
+  private val onDetailRendered by EventDispatcher()
 
   internal var docId = ""
   internal var page = 0
@@ -32,9 +34,14 @@ class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, 
   internal var nightMode = false
   internal var sepia = false
   internal var retryToken = 0.0
+  internal var detailRegion: NormalizedRegion? = null
 
   private var controller: PageRenderController<Bitmap>? = null
   private var shown: Bitmap? = null
+  private var tile: Bitmap? = null
+  private var tileArea: NormalizedRegion? = null
+  private val tileSource = Rect()
+  private val tileDestination = RectF()
   private var mode = PaperMode.DAY
   private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
   private val destination = Rect()
@@ -54,6 +61,33 @@ class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     override fun onRenderError(page: Int, code: String) {
       send("onRenderError") { onRenderError(mapOf("page" to page, "code" to code)) }
+    }
+
+    override fun displayTile(tile: Bitmap?, covered: NormalizedRegion?, content: RenderPlan?) {
+      this@PdfPageView.tile = tile
+      tileArea = covered
+      if (content == null) tileSource.setEmpty() else tileSource.set(0, 0, content.widthPx, content.heightPx)
+      invalidate()
+    }
+
+    override fun onDetailRendered(page: Int, region: NormalizedRegion, widthPx: Int, heightPx: Int, ms: Long, waitMs: Long) {
+      send("onDetailRendered") {
+        onDetailRendered(
+          mapOf(
+            "page" to page,
+            "region" to mapOf("x" to region.x, "y" to region.y, "width" to region.width, "height" to region.height),
+            "widthPx" to widthPx,
+            "heightPx" to heightPx,
+            "ms" to ms.toInt(),
+            "waitMs" to waitMs.toInt(),
+          ),
+        )
+      }
+    }
+
+    // Tiles are optional sharpness: a failure only costs the tile. Code only, no paths.
+    override fun onDetailDropped(code: String) {
+      Log.w(TAG, "detail tile dropped: $code")
     }
 
     override fun afterNextFrames(block: () -> Unit) = FrameDeferral.afterNextFrames(block)
@@ -86,7 +120,7 @@ class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, 
       host.onRenderError(page, ERR_RENDER_FAILED)
       return
     }
-    render.setProps(PageViewProps(docId, page, renderScale, retryToken))
+    render.setProps(PageViewProps(docId, page, renderScale, retryToken, detailRegion))
     if (width > 0 && height > 0) render.setSize(currentSize())
   }
 
@@ -96,6 +130,8 @@ class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, 
     controller?.dispose()
     controller = null
     shown = null
+    tile = null
+    tileArea = null
   }
 
   override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -113,15 +149,29 @@ class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, 
     super.onDetachedFromWindow()
   }
 
+  // Placeholder, then the whole page scaled to the bounds, then the detail
+  // tile over its area; one paint, so night/sepia apply to both.
   override fun onDraw(canvas: Canvas) {
     super.onDraw(canvas)
     val bitmap = shown
     if (bitmap == null || bitmap.isRecycled) {
       canvas.drawColor(PaperColors.paperColor(mode))
-      return
+    } else {
+      destination.set(0, 0, width, height)
+      canvas.drawBitmap(bitmap, null, destination, paint)
     }
-    destination.set(0, 0, width, height)
-    canvas.drawBitmap(bitmap, null, destination, paint)
+    val detail = tile
+    val area = tileArea
+    if (detail != null && area != null && !detail.isRecycled && !tileSource.isEmpty) {
+      tileDestination.set(
+        (area.x * width).toFloat(),
+        (area.y * height).toFloat(),
+        ((area.x + area.width) * width).toFloat(),
+        ((area.y + area.height) * height).toFloat(),
+      )
+      // Only the content window; the rest of the 64 px bucket is not part of the tile.
+      canvas.drawBitmap(detail, tileSource, tileDestination, paint)
+    }
   }
 
   private fun currentSize() = ViewSize(width, height, resources.displayMetrics.density)

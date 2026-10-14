@@ -5,18 +5,35 @@ import kotlin.math.abs
 /**
  * The JS props that select what a page view shows. A changed [retryToken]
  * makes an otherwise identical request new, so it renders again.
+ * [detailRegion] asks for a sharp tile over that part of the page; it never
+ * affects the whole-page bitmap.
  */
-internal data class PageViewProps(val docId: String, val page: Int, val renderScale: Double, val retryToken: Double = 0.0)
+internal data class PageViewProps(
+  val docId: String,
+  val page: Int,
+  val renderScale: Double,
+  val retryToken: Double = 0.0,
+  val detailRegion: NormalizedRegion? = null,
+)
 
 /** The view's laid-out size in px and the display density (px per dp). */
 internal data class ViewSize(val widthPx: Int, val heightPx: Int, val density: Float)
 
-/** One render request handed to a [PageRenderBackend]. */
-internal data class RenderSpec(val docId: String, val page: Int, val plan: RenderPlan)
+/**
+ * One render request handed to a [PageRenderBackend]. [plan] is the bitmap
+ * size. Without [window] the whole page fills it; with one, the bitmap is a
+ * detail tile showing that window of a larger page image.
+ */
+internal data class RenderSpec(val docId: String, val page: Int, val plan: RenderPlan, val window: TileWindow? = null)
 
 internal sealed class RenderOutcome<out B : Any> {
-  /** [widthPx] x [heightPx] is the bitmap's actual size (lower than planned after an OOM retry). */
-  class Rendered<B : Any>(val bitmap: B, val widthPx: Int, val heightPx: Int, val ms: Long) : RenderOutcome<B>()
+  /**
+   * [widthPx] x [heightPx] is the bitmap's actual size (lower than planned
+   * after an OOM retry). [ms] is the render time on the PDFium thread,
+   * [waitMs] the time the request waited in the PDFium queue before it.
+   */
+  class Rendered<B : Any>(val bitmap: B, val widthPx: Int, val heightPx: Int, val ms: Long, val waitMs: Long = 0) :
+    RenderOutcome<B>()
 
   class Failed(val code: String) : RenderOutcome<Nothing>()
 
@@ -31,7 +48,14 @@ internal fun interface RenderCancellable {
 
 /** Renders pages into pooled bitmaps. Implemented by PageRenderService. */
 internal interface PageRenderBackend<B : Any> {
+  /** Caps on whole-page bitmaps of pages shown unzoomed; a page over them is zoomed. */
   val caps: RenderCaps
+
+  /** Caps on a zoomed page's whole-page bitmap (the backdrop under its detail tile). */
+  val backdropCaps: RenderCaps
+
+  /** Caps on detail tiles. */
+  val tileCaps: RenderCaps
 
   /**
    * Starts rendering [spec]. [onDone] runs at most once, on the UI thread,
@@ -47,12 +71,25 @@ internal interface PageRenderBackend<B : Any> {
 
 /** What the controller needs from its view. UI thread only. */
 internal interface PageRenderHost<B : Any> {
-  /** Draws [bitmap], or the paper placeholder when null. */
+  /** Draws [bitmap] as the whole page, or the paper placeholder when null. */
   fun display(bitmap: B?)
+
+  /**
+   * Draws the top-left [content] px of [tile] over [covered] (normalized to
+   * the view's bounds), or no tile when null. The rest of the bitmap (its
+   * 64 px bucket) is not drawn.
+   */
+  fun displayTile(tile: B?, covered: NormalizedRegion?, content: RenderPlan?)
 
   fun onRendered(page: Int, widthPx: Int, heightPx: Int, ms: Long)
 
   fun onRenderError(page: Int, code: String)
+
+  /** A tile for [region] (clamped) is on screen; [waitMs] is its time queued for the PDFium thread. */
+  fun onDetailRendered(page: Int, region: NormalizedRegion, widthPx: Int, heightPx: Int, ms: Long, waitMs: Long)
+
+  /** A tile render failed; the tile is dropped and nothing is reported to JS. */
+  fun onDetailDropped(code: String)
 
   /**
    * Runs [block] once no frame drawn before this call can still be read by
@@ -72,6 +109,7 @@ internal interface PageRenderHost<B : Any> {
  * Render state machine of one PdfPageView, pure so it is unit-tested on the
  * JVM. UI thread only.
  *
+ * Whole-page bitmap:
  * - [setProps] and [setSize] are coalesced: one flush after the current
  *   UI-thread work, so a recycled cell whose props and layout change in the
  *   same mount batch starts one render, at the new size.
@@ -82,11 +120,18 @@ internal interface PageRenderHost<B : Any> {
  * - The bitmap on screen stays until its replacement is ready when only the
  *   scale or size changed (and the aspect ratio did not), and also when a
  *   re-render of that page fails. When docId or page changed, or the aspect
- *   ratio did, it is cleared at once: a recycled cell never shows another
- *   page, and no bitmap is drawn stretched.
- * - A replaced bitmap is released only after the next frames
- *   ([PageRenderHost.afterNextFrames]), so the pool never reuses a bitmap
- *   the render thread may still be drawing.
+ *   ratio did, it is cleared at once.
+ *
+ * Detail tile (only while the whole-page bitmap is capped below renderScale):
+ * - Its own generation: a region or size change renders a new tile and
+ *   cancels the old render, leaving the whole page untouched. The previous
+ *   tile stays drawn at its normalized area until the new one arrives.
+ * - A docId/page change, a null region, or a page that is no longer capped
+ *   drops the tile. A failed tile is dropped silently.
+ *
+ * A replaced bitmap or tile is released only after the next frames
+ * ([PageRenderHost.afterNextFrames]), so the pool never reuses a bitmap the
+ * render thread may still be drawing.
  */
 internal class PageRenderController<B : Any>(
   private val backend: PageRenderBackend<B>,
@@ -98,19 +143,34 @@ internal class PageRenderController<B : Any>(
 
   private var props: PageViewProps? = null
   private var size: ViewSize? = null
+  private var flushScheduled = false
+  private var attached = initiallyAttached
+  private var disposed = false
+  private val retired = ArrayList<B>()
+
+  // Whole page.
   private var requested: RequestKey? = null
   private var generation = 0
   private var inFlight: RenderCancellable? = null
   private var shown: B? = null
   private var shownPage: Pair<String, Int>? = null
   private var shownAspect = 0.0
-  private val retired = ArrayList<B>()
-  private var flushScheduled = false
-  private var attached = initiallyAttached
-  private var disposed = false
+  private var shownWidthPx = 0
+  private var shownHeightPx = 0
+
+  // Detail tile.
+  private var tileRequested: RequestKey? = null
+  private var tileGeneration = 0
+  private var tileInFlight: RenderCancellable? = null
+  private var tile: B? = null
+  private var tilePage: Pair<String, Int>? = null
+  private var tileCovered: NormalizedRegion? = null
 
   val isRendering: Boolean get() = inFlight != null
+  val isRenderingTile: Boolean get() = tileInFlight != null
   val displayed: B? get() = shown
+  val displayedTile: B? get() = tile
+  val displayedTileArea: NormalizedRegion? get() = tileCovered
   val retiredCount: Int get() = retired.size
 
   /** Stages new props; rendering starts at the coalesced flush. */
@@ -150,6 +210,7 @@ internal class PageRenderController<B : Any>(
     generation++
     cancelInFlight()
     clearShown()
+    dropTile()
   }
 
   /** The view is gone for good. Later outcomes are released unseen. */
@@ -159,12 +220,17 @@ internal class PageRenderController<B : Any>(
     disposed = true
   }
 
-  /** Starts a render if the request changed since the last one. */
+  /** Starts the whole-page and tile renders the current request needs. */
   fun refresh() {
     if (disposed || !attached) return
     val current = props ?: return
+    refreshPage(current)
+    refreshTile(current)
+  }
+
+  private fun refreshPage(current: PageViewProps) {
     val viewSize = size
-    val key = RequestKey(current, viewSize)
+    val key = RequestKey(current.copy(detailRegion = null), viewSize)
     if (key == requested) return
     requested = key
     generation++
@@ -182,11 +248,50 @@ internal class PageRenderController<B : Any>(
     }
     // No plan until the view is laid out; setSize brings it back here.
     viewSize ?: return
-    val plan = PageRenderMath.plan(viewSize.widthPx, viewSize.heightPx, viewSize.density, current.renderScale, backend.caps)
+    // A zoomed page (over the unzoomed caps) is a soft backdrop under its tile.
+    val zoomed = PageRenderMath.isCapped(viewSize.widthPx, viewSize.heightPx, viewSize.density, current.renderScale, backend.caps)
+    val caps = if (zoomed) backend.backdropCaps else backend.caps
+    val plan = PageRenderMath.plan(viewSize.widthPx, viewSize.heightPx, viewSize.density, current.renderScale, caps)
       ?: return
+    // Every zoom step resizes every mounted page; when the capped plan is the
+    // bitmap already shown for this page (same aspect, checked above), it is
+    // only drawn at a new size: no render, and nothing queues ahead of tiles.
+    if (shown != null && shownPage == current.docId to current.page &&
+      shownWidthPx == plan.widthPx && shownHeightPx == plan.heightPx
+    ) {
+      return
+    }
     val ticket = generation
     inFlight = backend.render(RenderSpec(current.docId, current.page, plan)) { outcome ->
       onOutcome(ticket, current, viewSize, outcome)
+    }
+  }
+
+  private fun refreshTile(current: PageViewProps) {
+    if (tilePage != null && tilePage != current.docId to current.page) dropTile()
+    val viewSize = size
+    val region = current.detailRegion?.let(PageRenderMath::clampRegion)
+    val plan = if (region != null && viewSize != null && current.docId.isNotEmpty() && current.page >= 0 &&
+      PageRenderMath.isCapped(viewSize.widthPx, viewSize.heightPx, viewSize.density, current.renderScale, backend.caps)
+    ) {
+      PageRenderMath.tilePlan(
+        viewSize.widthPx, viewSize.heightPx, viewSize.density, current.renderScale, region, backend.tileCaps,
+      )
+    } else {
+      null
+    }
+    if (plan == null || region == null || viewSize == null) {
+      dropTile()
+      return
+    }
+    val key = RequestKey(current.copy(detailRegion = region), viewSize)
+    if (key == tileRequested) return
+    tileRequested = key
+    tileGeneration++
+    cancelTileInFlight()
+    val ticket = tileGeneration
+    tileInFlight = backend.render(RenderSpec(current.docId, current.page, plan.bitmap, plan.window)) { outcome ->
+      onTileOutcome(ticket, current, region, plan, viewSize, outcome)
     }
   }
 
@@ -217,6 +322,8 @@ internal class PageRenderController<B : Any>(
         shown = outcome.bitmap
         shownPage = request.docId to request.page
         shownAspect = outcome.widthPx.toDouble() / outcome.heightPx
+        shownWidthPx = outcome.widthPx
+        shownHeightPx = outcome.heightPx
         host.display(outcome.bitmap)
         host.onRendered(request.page, outcome.widthPx, outcome.heightPx, outcome.ms)
       }
@@ -226,6 +333,38 @@ internal class PageRenderController<B : Any>(
         host.onRenderError(request.page, outcome.code)
       }
       // Only a superseded render is cancelled, and those were dropped above.
+      RenderOutcome.Cancelled -> Unit
+    }
+  }
+
+  private fun onTileOutcome(
+    ticket: Int,
+    request: PageViewProps,
+    region: NormalizedRegion,
+    plan: TilePlan,
+    requestSize: ViewSize,
+    outcome: RenderOutcome<B>,
+  ) {
+    if (disposed || ticket != tileGeneration || requestSize != size) {
+      // As for the page: a finished render of the current generation is no longer in flight.
+      if (ticket == tileGeneration) tileInFlight = null
+      if (outcome is RenderOutcome.Rendered) backend.release(outcome.bitmap)
+      return
+    }
+    tileInFlight = null
+    when (outcome) {
+      is RenderOutcome.Rendered -> {
+        tile?.let(::retire)
+        tile = outcome.bitmap
+        tilePage = request.docId to request.page
+        tileCovered = plan.covered
+        host.displayTile(outcome.bitmap, plan.covered, plan.tile)
+        host.onDetailRendered(request.page, region, plan.tile.widthPx, plan.tile.heightPx, outcome.ms, outcome.waitMs)
+      }
+      is RenderOutcome.Failed -> {
+        clearTile()
+        host.onDetailDropped(outcome.code)
+      }
       RenderOutcome.Cancelled -> Unit
     }
   }
@@ -244,12 +383,36 @@ internal class PageRenderController<B : Any>(
     inFlight = null
   }
 
+  private fun cancelTileInFlight() {
+    tileInFlight?.cancel()
+    tileInFlight = null
+  }
+
   private fun clearShown() {
     val bitmap = shown ?: return
     shown = null
     shownPage = null
     shownAspect = 0.0
+    shownWidthPx = 0
+    shownHeightPx = 0
     host.display(null)
+    retire(bitmap)
+  }
+
+  /** Forgets the tile request, stops its render and clears the tile. */
+  private fun dropTile() {
+    tileRequested = null
+    tileGeneration++
+    cancelTileInFlight()
+    clearTile()
+  }
+
+  private fun clearTile() {
+    val bitmap = tile ?: return
+    tile = null
+    tilePage = null
+    tileCovered = null
+    host.displayTile(null, null, null)
     retire(bitmap)
   }
 

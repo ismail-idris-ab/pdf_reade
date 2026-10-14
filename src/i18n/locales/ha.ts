@@ -250,6 +250,8 @@ export const ha: Catalog = {
     unsupportedMessage:
       'A yanzu wannan manhaja tana karanta fayilolin PDF kawai. Za ka iya tura wannan fayil zuwa wata manhajar da ke buɗe shi.',
     shareToApp: 'Tura zuwa wata manhaja',
+    zoomIn: 'Ƙara girma',
+    zoomOut: 'Rage girma',
   },
   settings: {
     title: 'Saituna',

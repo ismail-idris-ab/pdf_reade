@@ -6,18 +6,22 @@
 // The fake renders a host View (testID defaults to `pdf-page-view-<page>`)
 // with every prop passed through, so tests can read `docId`, `renderScale`,
 // `nightMode`… from the host node and drive the native events with
-// `fireEvent(node, 'rendered', { nativeEvent })` / `fireEvent(node, 'renderError', …)`.
+// `fireEvent(node, 'rendered', { nativeEvent })` / `fireEvent(node, 'renderError', …)` /
+// `fireEvent(node, 'detailRendered', …)`; `detailRegion` is readable as a prop.
 import { createElement } from 'react';
 import { View } from 'react-native';
 
 import type {
+  DetailRenderedEvent,
   PageRenderedEvent,
   PageRenderErrorEvent,
   PdfPageViewProps,
 } from '../../modules/pdf-engine/src/PdfPageView';
 
 /** A NativeSyntheticEvent-shaped payload for fireEvent. */
-export function nativeEvent<T extends PageRenderedEvent | PageRenderErrorEvent>(payload: T) {
+export function nativeEvent<
+  T extends PageRenderedEvent | DetailRenderedEvent | PageRenderErrorEvent,
+>(payload: T) {
   return { nativeEvent: payload };
 }
 

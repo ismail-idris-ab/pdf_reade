@@ -1,6 +1,7 @@
 package com.ismailidris.pdfreader.pdfengine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,13 +70,13 @@ class PageRenderMathTest {
   }
 
   @Test
-  fun perBitmapCapIsHalfTheBudgetThe16MpCapAndTheDrawLimit() {
-    // 32 MB budget: 16 MB per bitmap = 4 Mi pixels.
-    assertEquals(4L * mb, PageRenderMath.capsFor(32 * mb).maxPixels)
-    // 96 MB budget: 48 MB = 12 Mi pixels.
-    assertEquals(12L * mb, PageRenderMath.capsFor(96 * mb).maxPixels)
+  fun perBitmapCapIsAQuarterOfTheBudgetThe16MpCapAndTheDrawLimit() {
+    // 32 MB budget: 8 MB per page bitmap = 2 Mi pixels.
+    assertEquals(2L * mb, PageRenderMath.capsFor(32 * mb).maxPixels)
+    // 96 MB budget: 24 MB = 6 Mi pixels.
+    assertEquals(6L * mb, PageRenderMath.capsFor(96 * mb).maxPixels)
     // A huge budget is held to 16 MP.
-    assertEquals(PageRenderMath.MAX_PIXELS, PageRenderMath.capsFor(1024 * mb).maxPixels)
+    assertEquals(PageRenderMath.MAX_PIXELS, PageRenderMath.capsFor(2048 * mb).maxPixels)
     assertEquals(PageRenderMath.MAX_SIDE, PageRenderMath.capsFor(32 * mb).maxSide)
     // Every cap keeps bitmaps under Android's 100 MB drawBitmap limit.
     for (budget in listOf(24 * mb, 96 * mb, 4096 * mb)) {
@@ -129,6 +130,114 @@ class PageRenderMathTest {
     val r = (mid shr 16) and 0xFF
     val b = mid and 0xFF
     assertTrue("sepia must be warm (r > b)", r > b)
+  }
+
+  // endregion
+
+  // region detail tiles
+
+  private val tileRoomy = RenderCaps(maxPixels = 100_000_000L, maxSide = 100_000)
+
+  @Test
+  fun twoBackdropsAndThreeTilesFitTheBudget() {
+    for (budget in listOf(24 * mb, 32 * mb, 64 * mb, 96 * mb)) {
+      val backdrop = PageRenderMath.backdropCapsFor(budget).maxPixels * 4
+      val tile = PageRenderMath.tileCapsFor(budget).maxPixels * 4
+      assertTrue("budget $budget", 2 * backdrop + 3 * tile <= budget)
+    }
+    // 32 MB: 1 Mi px backdrops, 2 Mi px tiles (a 1080 x 2400 viewport at 0.9x linear).
+    assertEquals(1L * mb, PageRenderMath.backdropCapsFor(32 * mb).maxPixels)
+    assertEquals(2L * mb, PageRenderMath.tileCapsFor(32 * mb).maxPixels)
+    // Unzoomed pages keep a quarter: a 1080 px phone's A4 page (1.65 MP) is not capped.
+    assertFalse(PageRenderMath.isCapped(1080, 1528, 2.625f, 2.625, PageRenderMath.capsFor(32 * mb)))
+    assertEquals(PageRenderMath.MAX_TILE_PIXELS, PageRenderMath.tileCapsFor(1024 * mb).maxPixels)
+  }
+
+  @Test
+  fun cappedOnlyWhenTheWholePageIsLowered() {
+    val caps = RenderCaps(maxPixels = 2L * mb, maxSide = 8192)
+    // 1×: 1080 x 1528 = 1.65 MP fits.
+    assertFalse(PageRenderMath.isCapped(1080, 1528, 2.625f, 2.625, caps))
+    // 4× zoom by layout: 4320 x 6112 px view at density scale = 26 MP.
+    assertTrue(PageRenderMath.isCapped(4320, 6112, 2.625f, 2.625, caps))
+    assertFalse(PageRenderMath.isCapped(0, 6112, 2.625f, 2.625, caps))
+  }
+
+  @Test
+  fun tileIsTheRegionWindowOfTheFullTarget() {
+    // 4× view (4320 x 6112 px), renderScale = density: full target = view px.
+    val plan = PageRenderMath.tilePlan(4320, 6112, 2.625f, 2.625, NormalizedRegion(0.25, 0.5, 0.25, 0.25), tileRoomy)!!
+    assertEquals(TileWindow(-1080, -3056, 4320, 6112), plan.window)
+    assertEquals(RenderPlan(1080, 1528), plan.tile)
+    assertEquals(RenderPlan(1088, 1536), plan.bitmap)
+    assertEquals(NormalizedRegion(0.25, 0.5, 0.25, 0.25), plan.covered)
+  }
+
+  @Test
+  fun tileWindowIsPixelAlignedAndCoversTheRegion() {
+    val region = NormalizedRegion(0.1234, 0.4321, 0.3333, 0.2222)
+    val plan = PageRenderMath.tilePlan(1000, 1414, 1f, 3.0, region, tileRoomy)!!
+    val w = plan.window
+    assertEquals(3000, w.pageWidthPx)
+    assertEquals(4242, w.pageHeightPx)
+    // floor(0.1234 * 3000) = 370; ceil(0.4567 * 3000) = 1371.
+    assertEquals(-370, w.startX)
+    assertEquals(1371 - 370, plan.tile.widthPx)
+    val c = plan.covered
+    assertTrue(c.x <= region.x && c.x + c.width >= region.x + region.width)
+    assertTrue(c.y <= region.y && c.y + c.height >= region.y + region.height)
+  }
+
+  @Test
+  fun regionsAreClampedAndEmptyOnesRejected() {
+    assertEquals(NormalizedRegion(0.0, 0.5, 0.5, 0.5), PageRenderMath.clampRegion(NormalizedRegion(-0.5, 0.5, 1.0, 0.75)))
+    assertNull(PageRenderMath.clampRegion(NormalizedRegion(1.2, 0.0, 0.5, 0.5)))
+    assertNull(PageRenderMath.clampRegion(NormalizedRegion(0.0, 0.0, 0.0, 0.5)))
+    assertNull(PageRenderMath.clampRegion(NormalizedRegion(Double.NaN, 0.0, 0.5, 0.5)))
+    val plan = PageRenderMath.tilePlan(1000, 1000, 1f, 1.0, NormalizedRegion(0.9, 0.9, 0.5, 0.5), tileRoomy)!!
+    assertEquals(RenderPlan(100, 100), plan.tile)
+    assertEquals(TileWindow(-900, -900, 1000, 1000), plan.window)
+    assertNull(PageRenderMath.tilePlan(1000, 1000, 1f, 1.0, NormalizedRegion(2.0, 2.0, 1.0, 1.0), tileRoomy))
+    assertNull(PageRenderMath.tilePlan(0, 1000, 1f, 1.0, NormalizedRegion(0.0, 0.0, 1.0, 1.0), tileRoomy))
+  }
+
+  @Test
+  fun tileOverItsCapScalesThePageImageDownProportionally() {
+    val caps = RenderCaps(maxPixels = 1_000_000L, maxSide = 8192)
+    // Whole 4× page as region: 26 MP wanted.
+    val plan = PageRenderMath.tilePlan(4320, 6112, 2.625f, 2.625, NormalizedRegion(0.0, 0.0, 1.0, 1.0), caps)!!
+    assertTrue("${plan.bitmap.pixels}", plan.bitmap.pixels <= caps.maxPixels)
+    assertTrue(plan.bitmap.pixels > caps.maxPixels * 0.9)
+    assertTrue(plan.tile.pixels <= plan.bitmap.pixels)
+    assertEquals(4320.0 / 6112.0, plan.window.pageWidthPx.toDouble() / plan.window.pageHeightPx, 0.002)
+    // The window still covers the region of the scaled page.
+    assertEquals(plan.window.pageWidthPx, plan.tile.widthPx)
+    // A region on the right half keeps its position after scaling.
+    val right = PageRenderMath.tilePlan(4320, 6112, 2.625f, 2.625, NormalizedRegion(0.5, 0.0, 0.5, 1.0), caps)!!
+    assertEquals(0.5, right.covered.x, 0.002)
+    assertTrue(right.bitmap.pixels <= caps.maxPixels)
+  }
+
+  @Test
+  fun tileMathIsTheSameForAnyRotation() {
+    // Region and output are both in displayed space: a landscape (rotated) page
+    // is just a wider view, with no rotation-specific offset.
+    val plan = PageRenderMath.tilePlan(6112, 4320, 2.625f, 2.625, NormalizedRegion(0.5, 0.25, 0.25, 0.25), tileRoomy)!!
+    assertEquals(TileWindow(-3056, -1080, 6112, 4320), plan.window)
+    assertEquals(RenderPlan(1528, 1080), plan.tile)
+  }
+
+  @Test
+  fun tileBitmapsAre64PxBucketsSoNearbySizesShareThem() {
+    assertEquals(64, PageRenderMath.bucket(1))
+    assertEquals(64, PageRenderMath.bucket(64))
+    assertEquals(128, PageRenderMath.bucket(65))
+    // Pans of a 4× view: content sizes differ by a pixel, buckets do not.
+    val a = PageRenderMath.tilePlan(4320, 6112, 2.625f, 2.625, NormalizedRegion(0.1000, 0.2, 0.25, 0.39), tileRoomy)!!
+    val b = PageRenderMath.tilePlan(4320, 6112, 2.625f, 2.625, NormalizedRegion(0.1003, 0.2004, 0.25, 0.39), tileRoomy)!!
+    assertTrue(a.tile != b.tile)
+    assertEquals(a.bitmap, b.bitmap)
+    assertEquals(0, a.bitmap.widthPx % 64)
   }
 
   // endregion

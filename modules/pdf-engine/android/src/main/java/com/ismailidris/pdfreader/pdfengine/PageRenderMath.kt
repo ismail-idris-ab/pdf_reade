@@ -1,5 +1,6 @@
 package com.ismailidris.pdfreader.pdfengine
 
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -67,12 +68,14 @@ internal object PageRenderMath {
     (memoryClassMb.toLong() * MB / 4).coerceIn(MIN_POOL_BUDGET_BYTES, MAX_POOL_BUDGET_BYTES)
 
   /**
-   * Per-bitmap caps for a pool of [poolBudgetBytes]. One bitmap may use at
-   * most half the budget, so a view can hold its old bitmap while the new one
-   * renders without the pair exceeding the budget on its own.
+   * Whole-page bitmap caps for a pool of [poolBudgetBytes]: a quarter of the
+   * budget each, for pages shown unzoomed. On a 32 MB pool that is 2 Mi px:
+   * a 1080 x 2400 phone's unzoomed A4 page is 1.65 MP, a 720p one's 0.73 MP.
+   * A page over this cap is zoomed in: it is drawn as a backdrop at
+   * [backdropCapsFor] with a detail tile ([tileCapsFor]) for the visible part.
    */
   fun capsFor(poolBudgetBytes: Long): RenderCaps {
-    val byBudget = poolBudgetBytes / 2 / BYTES_PER_PIXEL
+    val byBudget = poolBudgetBytes / 4 / BYTES_PER_PIXEL
     val byDrawLimit = DRAW_BITMAP_LIMIT_BYTES / BYTES_PER_PIXEL
     return RenderCaps(maxPixels = max(1L, min(MAX_PIXELS, min(byBudget, byDrawLimit))), maxSide = MAX_SIDE)
   }
@@ -111,6 +114,113 @@ internal object PageRenderMath {
   }
 
   private const val FLOOR_EPSILON = 1e-6
+
+  /**
+   * Backdrop caps: a zoomed page's whole-page bitmap, under the detail tile,
+   * gets an eighth of the budget (1 Mi px on 32 MB). It only shows while a
+   * pan or zoom settles, so it can be soft.
+   */
+  fun backdropCapsFor(poolBudgetBytes: Long): RenderCaps {
+    val byBudget = poolBudgetBytes / 8 / BYTES_PER_PIXEL
+    return RenderCaps(maxPixels = max(1L, min(MAX_PIXELS, byBudget)), maxSide = MAX_SIDE)
+  }
+
+  /**
+   * Detail tile caps: a quarter of the budget each, at most [MAX_TILE_PIXELS].
+   * Zoomed reading holds at most two visible pages: two backdrops at 1/8 plus
+   * three tiles at 1/4 (one per visible page, plus one being replaced) is
+   * 2/8 + 3/4 = the whole budget. On a 32 MB pool a tile is 2 Mi px: a 720p
+   * viewport (1.15 MP) at full scale, a 1080 x 2400 one (2.6 MP) at 0.9x
+   * linear (it was 0.64x at 1/8). Tiles are 64 px buckets
+   * ([TILE_BUCKET_PX]); the cap is checked on the bucket.
+   */
+  fun tileCapsFor(poolBudgetBytes: Long): RenderCaps {
+    val byBudget = poolBudgetBytes / 4 / BYTES_PER_PIXEL
+    return RenderCaps(maxPixels = max(1L, min(MAX_TILE_PIXELS, byBudget)), maxSide = MAX_SIDE)
+  }
+
+  /**
+   * True when the whole-page bitmap for this view would be lowered by
+   * [caps], i.e. it is below renderScale and a detail tile adds sharpness.
+   */
+  fun isCapped(viewWidthPx: Int, viewHeightPx: Int, density: Float, renderScale: Double, caps: RenderCaps): Boolean {
+    val plan = plan(viewWidthPx, viewHeightPx, density, renderScale, caps) ?: return false
+    val wanted = viewWidthPx / density.toDouble() * renderScale
+    return plan.widthPx < wanted * CAPPED_RATIO
+  }
+
+  /** [region] clamped to the unit square, or null when it is not finite or has no area left. */
+  fun clampRegion(region: NormalizedRegion): NormalizedRegion? {
+    with(region) {
+      if (!x.isFinite() || !y.isFinite() || !width.isFinite() || !height.isFinite()) return null
+      val left = x.coerceIn(0.0, 1.0)
+      val top = y.coerceIn(0.0, 1.0)
+      val right = (x + width).coerceIn(0.0, 1.0)
+      val bottom = (y + height).coerceIn(0.0, 1.0)
+      if (right <= left || bottom <= top) return null
+      return NormalizedRegion(left, top, right - left, bottom - top)
+    }
+  }
+
+  /**
+   * The tile that shows [region] (normalized to the view's displayed bounds)
+   * at [renderScale]: the page is drawn at the view's full target size
+   * (layout dp x renderScale) and the tile is the pixel-aligned window over
+   * the region, so it is at most the region's on-screen size when renderScale
+   * is the density. Over [caps] the whole page image is scaled down until the
+   * window fits. Null when the view has no size or the inputs are unusable.
+   * Rotation needs no handling: the region and PDFium's output are both in
+   * displayed orientation.
+   */
+  fun tilePlan(
+    viewWidthPx: Int,
+    viewHeightPx: Int,
+    density: Float,
+    renderScale: Double,
+    region: NormalizedRegion,
+    caps: RenderCaps,
+  ): TilePlan? {
+    if (viewWidthPx <= 0 || viewHeightPx <= 0) return null
+    if (!density.isFinite() || density <= 0f || !isValidScale(renderScale)) return null
+    val clamped = clampRegion(region) ?: return null
+    val fullWidth = viewWidthPx / density.toDouble() * renderScale
+    val fullHeight = viewHeightPx / density.toDouble() * renderScale
+    var factor = 1.0
+    // ceil() can push a scaled window back over a cap by a pixel; a few rounds settle it.
+    repeat(MAX_TILE_FIT_ROUNDS) {
+      val tile = window(fullWidth * factor, fullHeight * factor, clamped)
+      val pixels = tile.bitmap.pixels.toDouble()
+      val longest = max(tile.bitmap.widthPx, tile.bitmap.heightPx).toDouble()
+      if (pixels <= caps.maxPixels && longest <= caps.maxSide) return tile
+      factor *= min(sqrt(caps.maxPixels / pixels), caps.maxSide / longest) * TILE_SHRINK_MARGIN
+    }
+    return window(fullWidth * factor, fullHeight * factor, clamped)
+  }
+
+  private fun window(pageWidth: Double, pageHeight: Double, region: NormalizedRegion): TilePlan {
+    val pageW = clampSide(pageWidth.roundToLong())
+    val pageH = clampSide(pageHeight.roundToLong())
+    val left = floor(region.x * pageW + FLOOR_EPSILON).toInt().coerceIn(0, pageW - 1)
+    val top = floor(region.y * pageH + FLOOR_EPSILON).toInt().coerceIn(0, pageH - 1)
+    val right = ceil((region.x + region.width) * pageW - FLOOR_EPSILON).toInt().coerceIn(left + 1, pageW)
+    val bottom = ceil((region.y + region.height) * pageH - FLOOR_EPSILON).toInt().coerceIn(top + 1, pageH)
+    val content = RenderPlan(right - left, bottom - top)
+    return TilePlan(content, TileWindow(-left, -top, pageW, pageH), RenderPlan(bucket(content.widthPx), bucket(content.heightPx)))
+  }
+
+  /** [side] rounded up to a whole [TILE_BUCKET_PX], so tiles of similar size share pooled bitmaps. */
+  fun bucket(side: Int): Int = ((side + TILE_BUCKET_PX - 1) / TILE_BUCKET_PX) * TILE_BUCKET_PX
+
+  /** Detail tiles never exceed 5 MP (20 MB): a 1440 x 3200 screen is 4.6 MP. */
+  const val MAX_TILE_PIXELS = 5_000_000L
+
+  /** Tile bitmaps are whole multiples of this many px on each side, for pool reuse. */
+  const val TILE_BUCKET_PX = 64
+
+  /** Below this share of the wanted width the page bitmap counts as capped (rounding stays above it). */
+  private const val CAPPED_RATIO = 0.98
+  private const val MAX_TILE_FIT_ROUNDS = 4
+  private const val TILE_SHRINK_MARGIN = 0.999
 
   /** The plan at half the scale (the out-of-memory retry), or null when it cannot shrink. */
   fun halve(plan: RenderPlan): RenderPlan? {
@@ -190,4 +300,33 @@ internal object PaperColors {
   }
 
   const val WHITE = -0x1 // 0xFFFFFFFF
+}
+
+/**
+ * A rectangle normalized to a view's displayed bounds (rotation applied):
+ * 0–1 on both axes, origin top-left.
+ */
+internal data class NormalizedRegion(val x: Double, val y: Double, val width: Double, val height: Double)
+
+/**
+ * Where a detail tile sits in the full page image: PDFium draws the page at
+ * [pageWidthPx] x [pageHeightPx] with its top-left at ([startX], [startY])
+ * in the tile bitmap (both <= 0), and clips to the tile.
+ */
+internal data class TileWindow(val startX: Int, val startY: Int, val pageWidthPx: Int, val pageHeightPx: Int)
+
+/**
+ * A detail tile: [tile] is the content (the window over the region), drawn
+ * from the top-left of a [bitmap] rounded up to 64 px buckets; the rest of
+ * the bitmap holds more of the page and is never drawn.
+ */
+internal data class TilePlan(val tile: RenderPlan, val window: TileWindow, val bitmap: RenderPlan = tile) {
+  /** The page area the tile actually covers (pixel-aligned, so a little more than the region). */
+  val covered: NormalizedRegion
+    get() = NormalizedRegion(
+      -window.startX.toDouble() / window.pageWidthPx,
+      -window.startY.toDouble() / window.pageHeightPx,
+      tile.widthPx.toDouble() / window.pageWidthPx,
+      tile.heightPx.toDouble() / window.pageHeightPx,
+    )
 }

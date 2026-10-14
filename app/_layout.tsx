@@ -8,6 +8,7 @@ import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ErrorScreen } from '@/components/ErrorScreen';
 import { ToastHost } from '@/components/ui';
@@ -24,6 +25,8 @@ void SplashScreen.preventAutoHideAsync();
 
 // expo-router wraps this layout (and every screen below it) in this boundary.
 export { ErrorScreen as ErrorBoundary };
+
+const ROOT_STYLE = { flex: 1 };
 
 export default function RootLayout() {
   const { success, error } = useMigrations(getDatabase(), migrations);
@@ -45,10 +48,14 @@ export default function RootLayout() {
   if (!success) return null;
 
   return (
-    <ThemeProvider>
-      <ThemedStack />
-      <ToastHost />
-    </ThemeProvider>
+    // Gestures (reader zoom, T2.4) need this root; a style prop because it is
+    // not a NativeWind-wrapped component.
+    <GestureHandlerRootView style={ROOT_STYLE}>
+      <ThemeProvider>
+        <ThemedStack />
+        <ToastHost />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
 

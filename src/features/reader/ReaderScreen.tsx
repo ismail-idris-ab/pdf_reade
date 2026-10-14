@@ -17,6 +17,7 @@ import {
   AppState,
   Linking,
   Pressable,
+  ScrollView,
   Text,
   useWindowDimensions,
   View,
@@ -24,6 +25,8 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { showErrorToast } from '@/components/errorToast';
@@ -61,6 +64,8 @@ import {
 } from './readingState';
 import { createReaderStore, ReaderStoreProvider, useReaderStore, type ReaderStore } from './store';
 import { useReaderDocument } from './useReaderDocument';
+import { useReaderZoom } from './useReaderZoom';
+import { zoomFrame } from './zoom';
 
 /** Top bar height below the status bar, dp. */
 export const TOP_BAR_HEIGHT = 56;
@@ -545,13 +550,14 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
     );
   }, []);
 
-  const frames = useMemo<PageFrame[]>(
+  const baseFrames = useMemo<PageFrame[]>(
     () =>
       pages.map((info) =>
         pageFrame(info, mode, viewport, { top: insets.top, bottom: insets.bottom }),
       ),
     [pages, mode, viewport, insets.top, insets.bottom],
   );
+  const crossRef = useRef<ScrollView>(null);
 
   /**
    * Scrolls `page` into place without animation. In vertical mode with the
@@ -568,10 +574,39 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
     [horizontal, store, insets.top],
   );
 
+  const toggleChrome = useCallback(() => store.getState().toggleChrome(), [store]);
+
+  const {
+    zoom,
+    gesture,
+    liveStyle,
+    onMainScroll,
+    onCrossScroll,
+    resetOffsets,
+    scheduleDetails,
+    zoomStep,
+  } = useReaderZoom({
+    initialZoom: restored.zoom,
+    viewport,
+    horizontal,
+    baseFrames,
+    listRef,
+    crossRef,
+    store,
+    saverRef,
+    scrollToPage,
+    onSingleTap: toggleChrome,
+  });
+  const frames = useMemo(
+    () => baseFrames.map((frame) => zoomFrame(frame, zoom)),
+    [baseFrames, zoom],
+  );
+
   // First layout of a list instance: put it on its anchor page, then show it.
   const onLoad = useCallback(() => {
     const { instance, page } = anchor;
     if (anchoredInstanceRef.current === instance) return;
+    resetOffsets();
     const reveal = () => {
       // Only the list on screen, once.
       if (currentInstanceRef.current !== instance) return;
@@ -582,6 +617,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       }
       anchoredInstanceRef.current = instance;
       setAnchoredInstance(instance);
+      scheduleDetails();
     };
     // Page 0 is already in place (top of the list, below the header).
     if (page === 0) {
@@ -594,7 +630,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       reportError(error);
       reveal();
     });
-  }, [anchor, scrollToPage]);
+  }, [anchor, scrollToPage, resetOffsets, scheduleDetails]);
 
   const showPage = useCallback(
     (page: number) => {
@@ -609,15 +645,27 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       const list = listRef.current;
       if (!list || anchoredInstanceRef.current !== anchor.instance) return;
       const { contentOffset, layoutMeasurement } = event.nativeEvent;
+      const offset = horizontal ? contentOffset.x : contentOffset.y;
+      onMainScroll(offset);
+      // Only the list's own axis decides the page; the sideways pan of a
+      // zoomed page (the outer scroll view) never reaches here.
       const page = pageAtScroll(
         list,
-        horizontal ? contentOffset.x : contentOffset.y,
+        offset,
         horizontal ? layoutMeasurement.width : layoutMeasurement.height,
         horizontal,
       );
       if (page !== null) showPage(page);
     },
-    [anchor.instance, horizontal, showPage],
+    [anchor.instance, horizontal, showPage, onMainScroll],
+  );
+
+  const onOuterScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset } = event.nativeEvent;
+      onCrossScroll(horizontal ? contentOffset.y : contentOffset.x);
+    },
+    [horizontal, onCrossScroll],
   );
 
   const jumpTo = useCallback(
@@ -642,8 +690,6 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
     setMode(next);
     saverRef.current?.setMode(next);
   }, [mode, saverRef]);
-
-  const toggleChrome = useCallback(() => store.getState().toggleChrome(), [store]);
 
   // Set once this reader starts closing; its document closes shortly after.
   const closingRef = useRef(false);
@@ -680,6 +726,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
           sepia={paper.sepia}
           onTap={toggleChrome}
           acceptRenderError={acceptRenderError}
+          onZoomStep={zoomStep}
           renderOverlay={renderOverlay}
         />
       );
@@ -692,6 +739,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       paper.sepia,
       toggleChrome,
       acceptRenderError,
+      zoomStep,
       renderOverlay,
     ],
   );
@@ -715,23 +763,58 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
         className="flex-1"
         style={{ opacity: anchoredInstance === anchor.instance ? 1 : 0 }}
       >
-        <FlashList
-          key={anchor.instance}
-          ref={listRef}
-          testID="reader-pages"
-          data={pages}
-          renderItem={renderItem}
-          extraData={renderItem}
-          keyExtractor={pageKey}
-          horizontal={horizontal}
-          pagingEnabled={horizontal}
-          onLoad={onLoad}
-          onScroll={onScroll}
-          scrollEventThrottle={32}
-          ListHeaderComponent={header}
-          ListFooterComponent={footer}
-          showsHorizontalScrollIndicator={false}
-        />
+        {/* The detector sits on a plain, never-transformed view: RNGH reports
+            focal points in the attached view's own coordinates with its
+            transform inverted, so attaching it to the transformed view would
+            feed the pinch's own pan back into the focal point. */}
+        <GestureDetector gesture={gesture}>
+          <View testID="reader-gesture-area" className="flex-1" collapsable={false}>
+            <Animated.View testID="reader-zoom" className="flex-1" style={liveStyle}>
+              {/* The sideways pan of a zoomed page: across the list's own axis
+                (horizontal in vertical mode, vertical in paged mode). Its
+                content is the list at zoom × the viewport. */}
+              <ScrollView
+                key={anchor.instance}
+                ref={crossRef}
+                testID="reader-pan"
+                horizontal={!horizontal}
+                scrollEnabled={zoom > 1}
+                onScroll={onOuterScroll}
+                scrollEventThrottle={32}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+                overScrollMode="never"
+              >
+                <View
+                  style={{
+                    width: horizontal ? viewport.width : viewport.width * zoom,
+                    height: horizontal ? viewport.height * zoom : viewport.height,
+                  }}
+                >
+                  <FlashList
+                    key={anchor.instance}
+                    ref={listRef}
+                    testID="reader-pages"
+                    data={pages}
+                    renderItem={renderItem}
+                    extraData={renderItem}
+                    keyExtractor={pageKey}
+                    horizontal={horizontal}
+                    // Paging snaps whole pages; a zoomed page pans freely instead.
+                    pagingEnabled={horizontal && zoom <= 1}
+                    onLoad={onLoad}
+                    onScroll={onScroll}
+                    scrollEventThrottle={32}
+                    ListHeaderComponent={header}
+                    ListFooterComponent={footer}
+                    showsHorizontalScrollIndicator={false}
+                  />
+                </View>
+              </ScrollView>
+            </Animated.View>
+          </View>
+        </GestureDetector>
       </View>
       <ReaderChrome
         title={file.name}

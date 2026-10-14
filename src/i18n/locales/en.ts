@@ -252,6 +252,8 @@ export const en = {
     unsupportedMessage:
       'This app reads PDF files only for now. You can share this file to another app that opens it.',
     shareToApp: 'Share to another app',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
   },
   settings: {
     title: 'Settings',

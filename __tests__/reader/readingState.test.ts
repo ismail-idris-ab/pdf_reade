@@ -53,6 +53,23 @@ describe('createReadingStateSaver', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it('saves a committed zoom at once (clamped), and later page saves keep it', () => {
+    const { save, saver } = setup();
+    saver.setZoom(2.5);
+    expect(save).toHaveBeenLastCalledWith({ fileId: 7, page: 2, mode: 'vertical', zoom: 2.5 });
+    saver.setZoom(9);
+    expect(save).toHaveBeenLastCalledWith({ fileId: 7, page: 2, mode: 'vertical', zoom: 5 });
+    saver.setZoom(5);
+    expect(save).toHaveBeenCalledTimes(2);
+    // Not a number: treated as 1×.
+    saver.setZoom(Number.NaN);
+    expect(save).toHaveBeenLastCalledWith({ fileId: 7, page: 2, mode: 'vertical', zoom: 1 });
+    saver.setZoom(5);
+    saver.setPage(6);
+    jest.runAllTimers();
+    expect(save).toHaveBeenLastCalledWith({ fileId: 7, page: 6, mode: 'vertical', zoom: 5 });
+  });
+
   it('saves a mode change at once, with the current page', () => {
     const { save, saver } = setup();
     saver.setPage(6);

@@ -17,6 +17,8 @@ import { AppError, toAppError } from '@/lib/errors';
 
 export {
   PdfPageView,
+  type DetailRegion,
+  type DetailRenderedEvent,
   type PageRenderedEvent,
   type PageRenderErrorEvent,
   type PdfPageViewProps,

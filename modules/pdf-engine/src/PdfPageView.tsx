@@ -11,6 +11,31 @@ export type PageRenderedEvent = {
   ms: number;
 };
 
+/**
+ * A region of the page as displayed in this view: 0–1 on both axes relative to
+ * the view's own bounds (rotation already applied), origin top-left.
+ */
+export type DetailRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type DetailRenderedEvent = {
+  /** 0-based page the tile belongs to. */
+  page: number;
+  /** The region the tile covers (as requested, clamped to 0–1). */
+  region: DetailRegion;
+  /** Tile size in pixels. */
+  widthPx: number;
+  heightPx: number;
+  /** Wall-clock render time on the PDFium thread, in ms. */
+  ms: number;
+  /** Time the render waited in the PDFium queue before it started, in ms. */
+  waitMs: number;
+};
+
 export type PageRenderErrorEvent = {
   /** 0-based page that failed. */
   page: number;
@@ -29,11 +54,22 @@ export type PdfPageViewProps = ViewProps & {
   /** 0-based page index. */
   page: number;
   /**
-   * Bitmap pixels per layout dp. Pass the screen density for 1× (PixelRatio.get());
-   * T2.4 passes zoom × density. The native side lowers it when the bitmap
-   * would exceed its memory caps, and reports the result in onRendered.
+   * Bitmap pixels per layout dp; pass the screen density (PixelRatio.get()).
+   * The reader zooms by laying the view out larger, so this stays the density
+   * at any zoom. The native side lowers the whole-page bitmap's scale when it
+   * would exceed its memory caps, and reports the result in onRendered;
+   * `detailRegion` restores full sharpness where the user is looking.
    */
   renderScale: number;
+  /**
+   * The part of the page currently visible, set once a zoom or pan has
+   * settled. When the whole-page bitmap is below renderScale (it was capped),
+   * the view renders this region at the full renderScale into a tile no larger
+   * than the region's on-screen size and draws it over the whole-page bitmap.
+   * null or omitted: no tile. Changing it replaces the tile; the previous tile
+   * stays drawn until the new one is ready. A docId/page change drops it.
+   */
+  detailRegion?: DetailRegion | null;
   /** Draw inverted (dark paper, light ink). Applied at draw time; no re-render. */
   nightMode?: boolean;
   /** Draw with a warm paper tint. Applied at draw time; no re-render. Ignored when nightMode. */
@@ -50,6 +86,8 @@ export type PdfPageViewProps = ViewProps & {
    * until the first one, a paper-coloured placeholder is drawn.
    */
   onRendered?: (event: NativeSyntheticEvent<PageRenderedEvent>) => void;
+  /** Fired each time a detail tile for the current detailRegion is on screen. */
+  onDetailRendered?: (event: NativeSyntheticEvent<DetailRenderedEvent>) => void;
   /**
    * Fired when the current docId/page cannot be rendered. If a bitmap of this
    * page is already shown (e.g. a higher renderScale failed), it stays;

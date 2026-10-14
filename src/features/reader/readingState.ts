@@ -2,6 +2,7 @@ import { MIN_ZOOM, MAX_ZOOM, READING_MODES, type ReadingMode } from '@/db/schema
 import type { ReadingStateRow } from '@/db/types';
 
 import { clampPage } from './layout';
+import { clampZoom } from './zoom';
 
 /** How long the page must stay put before it is saved, ms. */
 export const SAVE_PAGE_DELAY_MS = 500;
@@ -9,7 +10,7 @@ export const SAVE_PAGE_DELAY_MS = 500;
 export type RestoredReadingState = {
   page: number;
   mode: ReadingMode;
-  /** Kept as stored: zoom is applied by T2.4, but saving must not reset it. */
+  /** 1×–5×. */
   zoom: number;
 };
 
@@ -48,6 +49,8 @@ export type ReadingStateSaver = {
   setPage: (page: number) => void;
   /** The mode changed; saved at once (with the current page). */
   setMode: (mode: ReadingMode) => void;
+  /** A zoom was committed (gesture settled); saved at once. */
+  setZoom: (zoom: number) => void;
   /** Saves a pending page now (app going to the background, screen closing). */
   flush: () => void;
   /** Flushes and stops: later calls are ignored. */
@@ -55,9 +58,8 @@ export type ReadingStateSaver = {
 };
 
 /**
- * Writes a document's reading_state row: page debounced, mode immediately,
- * zoom carried over unchanged from what was restored. Skips writes that
- * would store what is already stored.
+ * Writes a document's reading_state row: page debounced, mode and committed
+ * zoom immediately. Skips writes that would store what is already stored.
  */
 export function createReadingStateSaver({
   fileId,
@@ -66,8 +68,8 @@ export function createReadingStateSaver({
   onError,
   delayMs = SAVE_PAGE_DELAY_MS,
 }: ReadingStateSaverOptions): ReadingStateSaver {
-  const current = { page: initial.page, mode: initial.mode };
-  let saved: { page: number; mode: ReadingMode } | null = null;
+  const current = { page: initial.page, mode: initial.mode, zoom: initial.zoom };
+  let saved: typeof current | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
 
@@ -80,9 +82,16 @@ export function createReadingStateSaver({
 
   function write() {
     cancelTimer();
-    if (saved !== null && saved.page === current.page && saved.mode === current.mode) return;
+    if (
+      saved !== null &&
+      saved.page === current.page &&
+      saved.mode === current.mode &&
+      saved.zoom === current.zoom
+    ) {
+      return;
+    }
     try {
-      save({ fileId, page: current.page, mode: current.mode, zoom: initial.zoom });
+      save({ fileId, page: current.page, mode: current.mode, zoom: current.zoom });
       saved = { ...current };
     } catch (error) {
       if (onError(error) === 'stop') {
@@ -102,6 +111,12 @@ export function createReadingStateSaver({
     setMode(mode) {
       if (disposed || mode === current.mode) return;
       current.mode = mode;
+      write();
+    },
+    setZoom(zoom) {
+      const clamped = clampZoom(zoom);
+      if (disposed || clamped === current.zoom) return;
+      current.zoom = clamped;
       write();
     },
     flush() {

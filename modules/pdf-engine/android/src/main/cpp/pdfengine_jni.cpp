@@ -367,8 +367,14 @@ JNIEXPORT void JNICALL JNI_FN(nativeFreeCancelToken)(JNIEnv*, jobject, jlong tok
   delete asToken(token);
 }
 
-// Renders the page over an ARGB_8888 bitmap (sizeX x sizeY, top-left anchored,
-// white paper first) with PDFium's progressive renderer, which asks the token
+// Renders the page scaled to sizeX x sizeY pixels with its top-left corner at
+// (startX, startY) in an ARGB_8888 bitmap (white paper first). PDFium maps the
+// page onto that display rectangle and clips to the bitmap, so a negative start
+// renders a window of a larger page image (a detail tile); (0, 0, bitmap size)
+// renders the whole page. Same semantics as FPDF_RenderPageBitmap's start_x,
+// start_y, size_x, size_y (fpdfview.h: "Left/Top pixel position of the display
+// area in bitmap coordinates", "Horizontal/Vertical size (in pixels) for
+// displaying the page") with PDFium's progressive renderer, which asks the token
 // between batches of page objects whether to stop. rotate is 0 because PDFium
 // adds the page's own /Rotate itself (CPDF_Page::GetDisplayMatrix), so the
 // output is in displayed orientation (checked by PageRenderServiceTest).
@@ -377,8 +383,8 @@ JNIEXPORT void JNICALL JNI_FN(nativeFreeCancelToken)(JNIEnv*, jobject, jlong tok
 // PDFIUM_ERROR:FPDF_ERR_PAGE. The page, progressive context, FPDF bitmap and
 // pixel lock are released on every path.
 JNIEXPORT jint JNICALL JNI_FN(nativeRenderPageProgressive)(JNIEnv* env, jobject, jlong handle, jint index,
-                                                           jobject bitmap, jint sizeX, jint sizeY,
-                                                           jlong token) {
+                                                           jobject bitmap, jint startX, jint startY,
+                                                           jint sizeX, jint sizeY, jlong token) {
   std::lock_guard<std::mutex> guard(g_lock);
   if (sizeX <= 0 || sizeY <= 0 || token == 0) {
     throwJava(env, kStateException, "Invalid render request");
@@ -418,7 +424,7 @@ JNIEXPORT jint JNICALL JNI_FN(nativeRenderPageProgressive)(JNIEnv* env, jobject,
   pause.user = const_cast<CancelToken*>(cancel);
   ProgressiveRenderCloser closer(page.get());
   int status =
-      FPDF_RenderPageBitmap_Start(target.get(), page.get(), 0, 0, sizeX, sizeY, 0, kRenderFlags, &pause);
+      FPDF_RenderPageBitmap_Start(target.get(), page.get(), startX, startY, sizeX, sizeY, 0, kRenderFlags, &pause);
   // TOBECONTINUED only follows a pause, and pauses only follow a cancel; the
   // check keeps a spurious pause from ending the render.
   while (status == FPDF_RENDER_TOBECONTINUED && !isCancelled(cancel)) {

@@ -44,6 +44,8 @@ internal class PageRenderService(
     this(reader, BitmapPool(PageRenderMath.poolBudgetBytes(memoryClassMb), AndroidBitmapAllocator))
 
   override val caps: RenderCaps = PageRenderMath.capsFor(pool.budgetBytes)
+  override val backdropCaps: RenderCaps = PageRenderMath.backdropCapsFor(pool.budgetBytes)
+  override val tileCaps: RenderCaps = PageRenderMath.tileCapsFor(pool.budgetBytes)
 
   // Last-resort guard; renderNow catches everything itself.
   private val uncaughtHandler = CoroutineExceptionHandler { _, error ->
@@ -111,9 +113,10 @@ internal class PageRenderService(
       return RenderCancellable {}
     }
     active.add(token)
+    val requestedAt = SystemClock.elapsedRealtime()
     val job = scope.launch {
       // Nothing below suspends, so a finished render is always delivered.
-      deliver(renderNow(spec, token), onDone)
+      deliver(renderNow(spec, token, requestedAt), onDone)
     }
     // Also runs for a job cancelled before it started (its body never runs).
     job.invokeOnCompletion {
@@ -144,12 +147,13 @@ internal class PageRenderService(
   }
 
   /** PDFium thread. Maps every failure (any Throwable) to an outcome; never throws. */
-  internal fun renderNow(spec: RenderSpec, token: RenderCancelToken): RenderOutcome<Bitmap> {
+  internal fun renderNow(spec: RenderSpec, token: RenderCancelToken, requestedAt: Long = SystemClock.elapsedRealtime()): RenderOutcome<Bitmap> {
     val started = SystemClock.elapsedRealtime()
+    val waitMs = started - requestedAt
     if (token.isCancelled) return RenderOutcome.Cancelled
     return try {
       reader().withRenderablePage(spec.docId, spec.page, token) { handle ->
-        renderWithRetry(handle, spec, token, started)
+        renderWithRetry(handle, spec, token, started, waitMs)
       }
     } catch (e: CodedException) {
       RenderOutcome.Failed(e.code)
@@ -171,13 +175,21 @@ internal class PageRenderService(
   }
 
   /**
-   * Renders at [spec]'s plan; on OutOfMemoryError (allocation or render)
-   * retries once at half the scale, then fails with OUT_OF_MEMORY. The
-   * bitmap goes back to the pool on every path except success.
+   * Renders at [spec]'s plan; on OutOfMemoryError (allocation or render) a
+   * whole page retries once at half the scale, then fails with
+   * OUT_OF_MEMORY. A detail tile is optional sharpness, so it fails at once
+   * (the view drops it). The bitmap goes back to the pool on every path
+   * except success.
    */
-  private fun renderWithRetry(handle: Long, spec: RenderSpec, token: RenderCancelToken, started: Long): RenderOutcome<Bitmap> {
+  private fun renderWithRetry(
+    handle: Long,
+    spec: RenderSpec,
+    token: RenderCancelToken,
+    started: Long,
+    waitMs: Long,
+  ): RenderOutcome<Bitmap> {
     var plan = spec.plan
-    var retried = false
+    var retried = spec.window != null
     while (true) {
       val bitmap: Bitmap
       val status: Int
@@ -185,7 +197,15 @@ internal class PageRenderService(
         bitmap = pool.acquire(plan.widthPx, plan.heightPx)
         try {
           beforeRenderForTest?.invoke()
-          status = PdfiumNative.renderPageProgressive(handle, spec.page, bitmap, token.nativeHandle)
+          val window = spec.window
+          status = if (window == null) {
+            PdfiumNative.renderPageProgressive(handle, spec.page, bitmap, token.nativeHandle)
+          } else {
+            PdfiumNative.renderPageProgressive(
+              handle, spec.page, bitmap, token.nativeHandle,
+              window.startX, window.startY, window.pageWidthPx, window.pageHeightPx,
+            )
+          }
         } catch (e: Throwable) {
           pool.release(bitmap)
           throw e
@@ -199,7 +219,7 @@ internal class PageRenderService(
       }
       when (status) {
         PdfiumNative.RENDER_DONE ->
-          return RenderOutcome.Rendered(bitmap, plan.widthPx, plan.heightPx, SystemClock.elapsedRealtime() - started)
+          return RenderOutcome.Rendered(bitmap, plan.widthPx, plan.heightPx, SystemClock.elapsedRealtime() - started, waitMs)
         PdfiumNative.RENDER_CANCELLED -> {
           pool.release(bitmap)
           return if (token.documentClosed) RenderOutcome.Failed(ERR_DOC_NOT_OPEN) else RenderOutcome.Cancelled

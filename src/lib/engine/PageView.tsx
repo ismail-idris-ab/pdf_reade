@@ -2,6 +2,7 @@ import { PixelRatio, type NativeSyntheticEvent } from 'react-native';
 
 import {
   PdfPageView,
+  type DetailRenderedEvent,
   type PageRenderedEvent,
   type PageRenderErrorEvent,
   type PdfPageViewProps,
@@ -10,12 +11,14 @@ import { AppError, toAppError } from '@/lib/errors';
 
 export type PageViewProps = Omit<
   PdfPageViewProps,
-  'renderScale' | 'onRendered' | 'onRenderError'
+  'renderScale' | 'onRendered' | 'onDetailRendered' | 'onRenderError'
 > & {
   /** Bitmap pixels per layout dp. Defaults to the screen density (1×). */
   renderScale?: number;
   /** A bitmap for the current docId/page/renderScale is on screen. */
   onRendered?: (event: PageRenderedEvent) => void;
+  /** A sharp tile for the current `detailRegion` is on screen. */
+  onDetailRendered?: (event: DetailRenderedEvent) => void;
   /**
    * The current page cannot be rendered. `error.code` is CORRUPT_FILE,
    * OUT_OF_MEMORY, or UNKNOWN for a non-shared native code (kept as the
@@ -36,9 +39,18 @@ export function pageRenderError(event: PageRenderErrorEvent): AppError {
  * displayed aspect ratio from OpenedDocument.pages; the view never opens or
  * closes the document.
  */
-export function PageView({ renderScale, onRendered, onRenderError, ...props }: PageViewProps) {
+export function PageView({
+  renderScale,
+  onRendered,
+  onDetailRendered,
+  onRenderError,
+  ...props
+}: PageViewProps) {
   const handleRendered = onRendered
     ? (event: NativeSyntheticEvent<PageRenderedEvent>) => onRendered(event.nativeEvent)
+    : undefined;
+  const handleDetailRendered = onDetailRendered
+    ? (event: NativeSyntheticEvent<DetailRenderedEvent>) => onDetailRendered(event.nativeEvent)
     : undefined;
   const handleRenderError = onRenderError
     ? (event: NativeSyntheticEvent<PageRenderErrorEvent>) =>
@@ -50,6 +62,7 @@ export function PageView({ renderScale, onRendered, onRenderError, ...props }: P
       {...props}
       renderScale={renderScale ?? PixelRatio.get()}
       onRendered={handleRendered}
+      onDetailRendered={handleDetailRendered}
       onRenderError={handleRenderError}
     />
   );

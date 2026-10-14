@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { useKeepAwake } from 'expo-keep-awake';
 import { router } from 'expo-router';
 import { AppState, Dimensions, Linking, Text, type AppStateStatus } from 'react-native';
+import { State } from 'react-native-gesture-handler';
+import { fireGestureHandler, getByGestureTestId } from 'react-native-gesture-handler/jest-utils';
 
 import FileIndexModule from '../../modules/file-index/src/FileIndexModule';
 import PdfEngineModule from '../../modules/pdf-engine/src/PdfEngineModule';
@@ -264,13 +266,25 @@ describe('ReaderScreen — reading', () => {
       screen.getAllByTestId('status-bar').some((node) => node.props.nativeID === 'hidden');
     expect(statusBarHidden()).toBe(false);
 
-    await act(async () => fireEvent.press(screen.getByTestId('reader-page-0')));
+    // A single tap (recognised once a double tap has failed).
+    await act(async () =>
+      fireGestureHandler(getByGestureTestId('reader-single-tap'), [
+        { state: State.BEGAN },
+        { state: State.ACTIVE },
+        { state: State.END },
+      ]),
+    );
     expect(statusBarHidden()).toBe(true);
     expect(screen.queryByTestId('reader-top-bar')).toBeNull();
     expect(screen.queryByTestId('reader-page-indicator')).toBeNull();
     expect(screen.queryByTestId('reader-thumbnails')).toBeNull();
 
-    await act(async () => fireEvent.press(screen.getByTestId('reader-page-1')));
+    // Screen readers: the page's "activate" action does the same.
+    await act(async () =>
+      fireEvent(screen.getByTestId('reader-page-1'), 'accessibilityAction', {
+        nativeEvent: { actionName: 'activate' },
+      }),
+    );
     expect(screen.getByTestId('reader-top-bar')).toBeOnTheScreen();
     expect(statusBarHidden()).toBe(false);
   });

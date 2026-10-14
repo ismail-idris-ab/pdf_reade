@@ -2,6 +2,7 @@ package com.ismailidris.pdfreader.pdfengine
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -19,6 +20,8 @@ class PageRenderControllerTest {
   /** Records renders; the test completes them by hand (as the main-thread post would). */
   private class FakeBackend : PageRenderBackend<Bmp> {
     override val caps = RenderCaps(maxPixels = 4_000_000L, maxSide = 8192)
+    override val backdropCaps = RenderCaps(maxPixels = 1_000_000L, maxSide = 8192)
+    override val tileCaps = RenderCaps(maxPixels = 2_000_000L, maxSide = 8192)
     val started = ArrayList<Pending>()
     val released = ArrayList<Bmp>()
     var checkedOut = 0
@@ -34,10 +37,10 @@ class PageRenderControllerTest {
       checkedOut--
     }
 
-    fun complete(index: Int, bitmap: Bmp, ms: Long = 5) {
+    fun complete(index: Int, bitmap: Bmp, ms: Long = 5, waitMs: Long = 0) {
       checkedOut++
       val spec = started[index].spec
-      started[index].onDone(RenderOutcome.Rendered(bitmap, spec.plan.widthPx, spec.plan.heightPx, ms))
+      started[index].onDone(RenderOutcome.Rendered(bitmap, spec.plan.widthPx, spec.plan.heightPx, ms, waitMs))
     }
 
     fun fail(index: Int, code: String) = started[index].onDone(RenderOutcome.Failed(code))
@@ -59,6 +62,27 @@ class PageRenderControllerTest {
 
     override fun onRenderError(page: Int, code: String) {
       errors.add(page to code)
+    }
+
+    var tile: Bmp? = null
+    var tileArea: NormalizedRegion? = null
+    val details = ArrayList<List<Any>>()
+    val dropped = ArrayList<String>()
+
+    var tileContent: RenderPlan? = null
+
+    override fun displayTile(tile: Bmp?, covered: NormalizedRegion?, content: RenderPlan?) {
+      this.tile = tile
+      tileArea = covered
+      tileContent = content
+    }
+
+    override fun onDetailRendered(page: Int, region: NormalizedRegion, widthPx: Int, heightPx: Int, ms: Long, waitMs: Long) {
+      details.add(listOf(page, region, widthPx, heightPx, waitMs))
+    }
+
+    override fun onDetailDropped(code: String) {
+      dropped.add(code)
     }
 
     override fun afterNextFrames(block: () -> Unit) {
@@ -354,12 +378,15 @@ class PageRenderControllerTest {
     val bitmap = Bmp("ok")
     backend.complete(2, bitmap)
     assertSame(bitmap, controller.displayed)
-    // A retry while a bitmap is shown re-renders and supersedes the old request.
+    // A retry while this page's bitmap of the same size is shown has nothing to redo.
     controller.setProps(PageViewProps("doc", 2, 2.625, retryToken = 3.0))
     host.runWork()
-    assertEquals(4, backend.started.size)
-    backend.complete(2, Bmp("late"))
+    assertEquals(3, backend.started.size)
     assertSame(bitmap, controller.displayed)
+    // At another scale it renders.
+    controller.setProps(PageViewProps("doc", 2, 2.0, retryToken = 4.0))
+    host.runWork()
+    assertEquals(4, backend.started.size)
   }
 
   @Test
@@ -370,6 +397,225 @@ class PageRenderControllerTest {
     host.runWork()
     assertEquals(0, backend.started.size)
   }
+
+  // region detail tile
+
+  // 4× zoom by layout: renderScale stays the density, the whole page (26 MP) is capped.
+  private val zoomed = ViewSize(4320, 6112, 2.625f)
+  private val topLeft = NormalizedRegion(0.0, 0.0, 0.25, 0.25)
+  private val middle = NormalizedRegion(0.4, 0.4, 0.25, 0.25)
+
+  private fun tileProps(region: NormalizedRegion?, page: Int = 0) = PageViewProps("doc", page, 2.625, detailRegion = region)
+
+  private fun tileIndices() = backend.started.indices.filter { backend.started[it].spec.window != null }
+
+  private fun pageIndices() = backend.started.indices.filter { backend.started[it].spec.window == null }
+
+  /** Zoomed page with its base and first tile on screen; returns the tile. */
+  private fun zoomedWithTile(region: NormalizedRegion = topLeft): Bmp {
+    controller.update(tileProps(region), zoomed)
+    backend.complete(pageIndices().last(), Bmp("base"))
+    val tile = Bmp("tile-$region")
+    backend.complete(tileIndices().last(), tile)
+    return tile
+  }
+
+  @Test
+  fun noTileUnlessTheWholePageIsCappedAndARegionIsSet() {
+    controller.update(tileProps(topLeft), size)
+    assertEquals("1×: the page bitmap is already sharp", 1, backend.started.size)
+    controller.update(tileProps(null), zoomed)
+    assertEquals(listOf(1), pageIndices().drop(1))
+    assertTrue(tileIndices().isEmpty())
+    controller.update(tileProps(topLeft), zoomed)
+    assertEquals(1, tileIndices().size)
+    val spec = backend.started[tileIndices()[0]].spec
+    assertEquals(TileWindow(0, 0, 4320, 6112), spec.window)
+    // The bitmap is the 64 px bucket around the 1080 x 1528 content.
+    assertEquals(RenderPlan(1088, 1536), spec.plan)
+    assertEquals("region alone does not re-render the page", 2, pageIndices().size)
+  }
+
+  @Test
+  fun tileIsDrawnAtItsAreaAndReported() {
+    val tile = zoomedWithTile(middle)
+    assertSame(tile, host.tile)
+    assertSame(tile, controller.displayedTile)
+    val area = host.tileArea!!
+    assertTrue(area.x <= 0.4 && area.x + area.width >= 0.65)
+    assertEquals(1, host.details.size)
+    assertEquals(0, host.details[0][0])
+    assertEquals(middle, host.details[0][1])
+  }
+
+  @Test
+  fun regionChangeKeepsTheOldTileUntilTheNewOneAndLeavesThePageAlone() {
+    val old = zoomedWithTile(topLeft)
+    val pagesBefore = pageIndices().size
+    controller.setProps(tileProps(middle))
+    host.runWork()
+    assertEquals(pagesBefore, pageIndices().size)
+    assertEquals(2, tileIndices().size)
+    assertSame("old tile stays meanwhile", old, controller.displayedTile)
+    val fresh = Bmp("fresh")
+    backend.complete(tileIndices().last(), fresh)
+    assertSame(fresh, controller.displayedTile)
+    assertFalse(old in backend.released)
+    host.runFrames()
+    assertTrue(old in backend.released)
+  }
+
+  @Test
+  fun supersededTileRenderIsCancelledAndItsResultReleased() {
+    zoomedWithTile(topLeft)
+    controller.setProps(tileProps(middle))
+    host.runWork()
+    val first = tileIndices().last()
+    controller.setProps(tileProps(NormalizedRegion(0.7, 0.7, 0.2, 0.2)))
+    host.runWork()
+    assertTrue(backend.started[first].cancelled)
+    val late = Bmp("late")
+    backend.complete(first, late)
+    assertTrue(late in backend.released)
+    assertTrue(host.details.size == 1)
+  }
+
+  @Test
+  fun pageChangeDropsTheTile() {
+    val tile = zoomedWithTile()
+    controller.update(tileProps(topLeft, page = 1), zoomed)
+    assertNull(controller.displayedTile)
+    assertNull(host.tile)
+    host.runFrames()
+    assertTrue(tile in backend.released)
+    // The new page gets its own tile request.
+    assertEquals(1, backend.started[tileIndices().last()].spec.page)
+  }
+
+  @Test
+  fun nullRegionOrZoomingBackOutDropsTheTile() {
+    zoomedWithTile()
+    controller.update(tileProps(null), zoomed)
+    assertNull(controller.displayedTile)
+    zoomedWithTile()
+    controller.update(tileProps(topLeft), size)
+    assertNull("1× needs no tile", controller.displayedTile)
+  }
+
+  @Test
+  fun sizeChangeKeepsTheTileAtItsNormalizedAreaUntilReplaced() {
+    val tile = zoomedWithTile(middle)
+    val area = controller.displayedTileArea
+    val threeX = ViewSize(3240, 4584, 2.625f)
+    controller.setSize(threeX)
+    host.runWork()
+    assertSame(tile, controller.displayedTile)
+    assertEquals(area, controller.displayedTileArea)
+    val spec = backend.started[tileIndices().last()].spec
+    assertEquals(3240, spec.window!!.pageWidthPx)
+  }
+
+  @Test
+  fun tileFailureIsSilentAndKeepsThePage() {
+    controller.update(tileProps(topLeft), zoomed)
+    val base = Bmp("base")
+    backend.complete(pageIndices().last(), base)
+    backend.fail(tileIndices().last(), ErrorCode.OUT_OF_MEMORY.name)
+    assertSame(base, controller.displayed)
+    assertNull(controller.displayedTile)
+    assertTrue(host.errors.isEmpty())
+    assertEquals(listOf(ErrorCode.OUT_OF_MEMORY.name), host.dropped)
+    // An identical request does not loop on the failure.
+    controller.setProps(tileProps(topLeft))
+    host.runWork()
+    assertEquals(1, tileIndices().size)
+  }
+
+  @Test
+  fun pageFailureDoesNotTouchTheTile() {
+    controller.update(tileProps(topLeft), zoomed)
+    val tile = Bmp("tile")
+    backend.complete(tileIndices().last(), tile)
+    backend.fail(pageIndices().last(), ErrorCode.CORRUPT_FILE.name)
+    assertEquals(listOf(0 to ErrorCode.CORRUPT_FILE.name), host.errors)
+    assertNull(controller.displayed)
+    assertSame("the tile stays over the placeholder", tile, controller.displayedTile)
+  }
+
+  @Test
+  fun detachAndDisposeReleaseTiles() {
+    zoomedWithTile()
+    controller.update(tileProps(middle), zoomed)
+    controller.dispose()
+    assertTrue(backend.started[tileIndices().last()].cancelled)
+    backend.complete(tileIndices().last(), Bmp("late"))
+    host.runFrames()
+    assertEquals(0, backend.checkedOut)
+  }
+
+  @Test
+  fun tileEventCarriesContentSizeAndQueueWait() {
+    controller.update(tileProps(topLeft), zoomed)
+    backend.complete(pageIndices().last(), Bmp("base"))
+    backend.complete(tileIndices().last(), Bmp("tile"), waitMs = 37)
+    assertEquals(listOf<Any>(0, topLeft, 1080, 1528, 37L), host.details.single())
+    assertEquals(RenderPlan(1080, 1528), host.tileContent)
+  }
+
+  @Test
+  fun zoomedPageIsABackdropAtTheBackdropCaps() {
+    controller.update(tileProps(topLeft), zoomed)
+    val plan = backend.started[pageIndices().single()].spec.plan
+    assertTrue("${plan.pixels}", plan.pixels <= backend.backdropCaps.maxPixels)
+    assertTrue(plan.pixels > backend.backdropCaps.maxPixels * 0.98)
+  }
+
+  @Test
+  fun atOneTimesARegionAsksForNoTileAndThePageIsFull() {
+    controller.update(tileProps(NormalizedRegion(0.0, 0.0, 1.0, 1.0)), size)
+    assertTrue(tileIndices().isEmpty())
+    assertEquals(RenderPlan(1080, 1527), backend.started.single().spec.plan)
+  }
+
+  @Test
+  fun zoomStepsDoNotReRenderACappedPageWhosePlanIsAlreadyShown() {
+    controller.update(tileProps(topLeft), zoomed)
+    backend.complete(pageIndices().last(), Bmp("backdrop"))
+    // 3× and 5× layouts of the same page: the backdrop plan is the same size.
+    controller.update(tileProps(topLeft), ViewSize(3240, 4584, 2.625f))
+    controller.update(tileProps(topLeft), ViewSize(5400, 7640, 2.625f))
+    assertEquals("only the first backdrop rendered", 1, pageIndices().size)
+    assertNotNull(controller.displayed)
+    // Tiles still follow the new sizes.
+    assertEquals(3, tileIndices().size)
+    // Zooming back to 1× needs a sharper page: it renders.
+    controller.update(tileProps(topLeft), size)
+    assertEquals(2, pageIndices().size)
+  }
+
+  @Test
+  fun staleSizeDropLeavesNothingInFlight() {
+    controller.update(props(), size)
+    assertTrue(controller.isRendering)
+    controller.setSize(ViewSize(540, 763, 2.625f))
+    backend.complete(0, Bmp("old-size"))
+    assertFalse("the dropped render is finished", controller.isRendering)
+    host.runWork()
+    assertTrue(controller.isRendering)
+  }
+
+  @Test
+  fun smallViewsAllowOnePixelOfAspectRounding() {
+    // A 30 x 43 view: a 1 px rounding is a 2–3% aspect change.
+    val small = ViewSize(30, 43, 1f)
+    controller.update(PageViewProps("doc", 0, 1.0), small)
+    val first = Bmp("first")
+    backend.complete(0, first)
+    controller.update(PageViewProps("doc", 0, 1.0), ViewSize(30, 42, 1f))
+    assertSame("kept: within one pixel", first, controller.displayed)
+  }
+
+  // endregion
 
   @Test
   fun manyCreateDestroyCyclesLeaveNothingCheckedOut() {
