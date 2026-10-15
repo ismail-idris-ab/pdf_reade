@@ -4,8 +4,13 @@ import PdfEngineModule from '../../modules/pdf-engine/src/PdfEngineModule';
 import { codedError, type FakePdfEngineModule } from '../engine/fakePdfEngine';
 import { getRepositories } from '@/db/client';
 import type { NewFile } from '@/db/types';
-import { CLOSE_DELAY_MS, useReaderDocument } from '@/features/reader/useReaderDocument';
-import { ERROR_CODES } from '@/lib/errors';
+import {
+  CLOSE_DELAY_MS,
+  reportableOpenError,
+  useReaderDocument,
+} from '@/features/reader/useReaderDocument';
+import { reportError } from '@/lib/crash';
+import { AppError, ERROR_CODES } from '@/lib/errors';
 import { useLibraryVersionStore } from '@/lib/library/version';
 
 jest.mock('../../modules/pdf-engine/src/PdfEngineModule', () =>
@@ -14,6 +19,10 @@ jest.mock('../../modules/pdf-engine/src/PdfEngineModule', () =>
 jest.mock('../../modules/file-index/src/FileIndexModule', () =>
   jest.requireActual('../files/fakeFileIndex').createFakeFileIndexModule(),
 );
+jest.mock('@/lib/crash', () => ({
+  ...jest.requireActual<typeof import('@/lib/crash')>('@/lib/crash'),
+  reportError: jest.fn(),
+}));
 jest.mock('@/db/client', () => {
   const { createTestDatabase } =
     jest.requireActual<typeof import('../db/testDatabase')>('../db/testDatabase');
@@ -109,17 +118,19 @@ describe('useReaderDocument', () => {
     expect(getRepositories().files.getById(file.id)?.lastOpenedAt).toBeNull();
   });
 
-  it.each([...ERROR_CODES.filter((code) => code !== 'CANCELLED'), 'UNKNOWN'])(
-    'reports %s as an error state without marking the file opened',
-    async (code) => {
-      const file = addFile();
-      engine.open.mockRejectedValueOnce(codedError(code === 'UNKNOWN' ? 'ERR_BRIDGE' : code));
-      const { result } = await renderHook(() => useReaderDocument(file.id));
-      await flush();
-      expect(result.current.state).toMatchObject({ status: 'error', code, contentSource: false });
-      expect(getRepositories().files.getById(file.id)?.lastOpenedAt).toBeNull();
-    },
-  );
+  it.each([
+    ...ERROR_CODES.filter(
+      (code) => code !== 'CANCELLED' && code !== 'PASSWORD_REQUIRED' && code !== 'WRONG_PASSWORD',
+    ),
+    'UNKNOWN',
+  ])('reports %s as an error state without marking the file opened', async (code) => {
+    const file = addFile();
+    engine.open.mockRejectedValueOnce(codedError(code === 'UNKNOWN' ? 'ERR_BRIDGE' : code));
+    const { result } = await renderHook(() => useReaderDocument(file.id));
+    await flush();
+    expect(result.current.state).toMatchObject({ status: 'error', code, contentSource: false });
+    expect(getRepositories().files.getById(file.id)?.lastOpenedAt).toBeNull();
+  });
 
   it('retries after an error and opens the document', async () => {
     const file = addFile();
@@ -166,5 +177,150 @@ describe('useReaderDocument', () => {
     await flush();
     expect(result.current.state).toMatchObject({ status: 'unsupported' });
     expect(engine.open).not.toHaveBeenCalled();
+  });
+});
+
+const SECRET = 'hunter2-secret';
+
+describe('useReaderDocument — password-protected files', () => {
+  it('asks for a password, opens with it, and drops it once the open settles', async () => {
+    const file = addFile();
+    engine.open.mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'));
+    const { result } = await renderHook(() => useReaderDocument(file.id));
+    await flush();
+    expect(result.current.state).toMatchObject({
+      status: 'password',
+      checking: false,
+      failedAttempts: 0,
+    });
+    expect(engine.open).toHaveBeenLastCalledWith(file.path, null, expect.any(String));
+    expect(getRepositories().files.getById(file.id)?.lastOpenedAt).toBeNull();
+
+    await act(async () => result.current.submitPassword(SECRET));
+    await flush();
+    expect(engine.open).toHaveBeenLastCalledWith(file.path, SECRET, expect.any(String));
+    expect(result.current.state.status).toBe('ready');
+    expect(getRepositories().files.getById(file.id)?.lastOpenedAt).toEqual(expect.any(Number));
+    // The hook's result holds no copy of the password.
+    expect(JSON.stringify(result.current.state)).not.toContain(SECRET);
+  });
+
+  it('keeps the prompt while checking and counts each wrong password, unlimited', async () => {
+    engine.setHoldOpens(true);
+    const file = addFile();
+    const { result } = await renderHook(() => useReaderDocument(file.id));
+    await act(async () => engine.rejectOpen(engine.pendingOpenIds()[0] ?? '', 'PASSWORD_REQUIRED'));
+
+    for (let tries = 1; tries <= 4; tries += 1) {
+      await act(async () => result.current.submitPassword(`wrong-${tries}`));
+      expect(result.current.state).toMatchObject({
+        status: 'password',
+        checking: true,
+        failedAttempts: tries - 1,
+      });
+      // A second submit while checking is ignored.
+      await act(async () => result.current.submitPassword('again'));
+      expect(engine.pendingOpenIds()).toHaveLength(1);
+      await act(async () => engine.rejectOpen(engine.pendingOpenIds()[0] ?? '', 'WRONG_PASSWORD'));
+      expect(result.current.state).toMatchObject({
+        status: 'password',
+        checking: false,
+        failedAttempts: tries,
+      });
+    }
+    expect(engine.open).toHaveBeenCalledTimes(5);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it('ignores an empty password', async () => {
+    const file = addFile();
+    engine.open.mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'));
+    const { result } = await renderHook(() => useReaderDocument(file.id));
+    await flush();
+    await act(async () => result.current.submitPassword(''));
+    expect(engine.open).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toMatchObject({ status: 'password', checking: false });
+  });
+
+  it('goes to the error state for another failure, and Try again asks for the password again', async () => {
+    const file = addFile();
+    engine.open
+      .mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'))
+      .mockRejectedValueOnce(codedError('OUT_OF_MEMORY'))
+      .mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'));
+    const { result } = await renderHook(() => useReaderDocument(file.id));
+    await flush();
+    await act(async () => result.current.submitPassword(SECRET));
+    await flush();
+    expect(result.current.state).toMatchObject({ status: 'error', code: 'OUT_OF_MEMORY' });
+
+    await act(async () => result.current.retry());
+    await flush();
+    // The retry carries no password: the prompt is back, with no stale error.
+    expect(engine.open).toHaveBeenLastCalledWith(file.path, null, expect.any(String));
+    expect(result.current.state).toMatchObject({ status: 'password', failedAttempts: 0 });
+  });
+
+  it('reports an unexpected failure of a password open by code only', async () => {
+    const file = addFile();
+    engine.open
+      .mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'))
+      .mockRejectedValueOnce(codedError('ERR_BRIDGE', `cannot convert argument "${SECRET}"`));
+    const { result } = await renderHook(() => useReaderDocument(file.id));
+    await flush();
+    await act(async () => result.current.submitPassword(SECRET));
+    await flush();
+    expect(result.current.state).toMatchObject({ status: 'error', code: 'UNKNOWN' });
+    expect(reportError).toHaveBeenCalledTimes(1);
+    const reported = jest.mocked(reportError).mock.calls[0]?.[0];
+    expect(reported).toBeInstanceOf(AppError);
+    expect((reported as AppError).message).not.toContain(SECRET);
+    expect((reported as AppError).cause).toBeUndefined();
+  });
+
+  it('aborts a password open still running at unmount, leaving nothing open', async () => {
+    engine.setHoldOpens(true);
+    const file = addFile();
+    const { result, unmount } = await renderHook(() => useReaderDocument(file.id));
+    await act(async () => engine.rejectOpen(engine.pendingOpenIds()[0] ?? '', 'PASSWORD_REQUIRED'));
+    await act(async () => result.current.submitPassword(SECRET));
+    const [openId] = engine.pendingOpenIds();
+    expect(openId).toBeDefined();
+
+    await unmount();
+    expect(engine.cancelOpen).toHaveBeenCalledWith(openId);
+    expect(engine.openDocIds()).toEqual([]);
+    expect(getRepositories().files.getById(file.id)?.lastOpenedAt).toBeNull();
+  });
+
+  it('asks again when the file is opened again later', async () => {
+    const file = addFile();
+    engine.open.mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'));
+    const first = await renderHook(() => useReaderDocument(file.id));
+    await flush();
+    await act(async () => first.result.current.submitPassword(SECRET));
+    await flush();
+    expect(first.result.current.state.status).toBe('ready');
+    await first.unmount();
+
+    engine.open.mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'));
+    const second = await renderHook(() => useReaderDocument(file.id));
+    await flush();
+    expect(engine.open).toHaveBeenLastCalledWith(file.path, null, expect.any(String));
+    expect(second.result.current.state).toMatchObject({ status: 'password' });
+  });
+});
+
+describe('reportableOpenError', () => {
+  it('passes an error through when no password was given', () => {
+    const error = new Error('boom');
+    expect(reportableOpenError(error, false)).toBe(error);
+  });
+
+  it('replaces it with a code-only error when a password was given', () => {
+    const reported = reportableOpenError(new TypeError(`bad ${SECRET}`), true);
+    expect(reported).toBeInstanceOf(AppError);
+    expect((reported as AppError).code).toBe('UNKNOWN');
+    expect((reported as AppError).message).toBe('Opening a protected document failed (TypeError)');
   });
 });

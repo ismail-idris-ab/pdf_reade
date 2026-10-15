@@ -30,12 +30,7 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { showErrorToast } from '@/components/errorToast';
-import {
-  ArrowBackIcon,
-  HorizontalPagesIcon,
-  LockIcon,
-  VerticalPagesIcon,
-} from '@/components/icons';
+import { ArrowBackIcon, HorizontalPagesIcon, VerticalPagesIcon } from '@/components/icons';
 import { Button, IconButton, toast } from '@/components/ui';
 import { getRepositories } from '@/db/client';
 import type { ReadingMode } from '@/db/schema';
@@ -43,7 +38,7 @@ import type { FileRow } from '@/db/types';
 import { useTranslation } from '@/i18n';
 import { reportError } from '@/lib/crash';
 import type { OpenedDocument, PageInfo } from '@/lib/engine';
-import { toRecoveryLabel, toUserMessage, type AppError, type AppErrorCode } from '@/lib/errors';
+import { toRecoveryLabel, toUserMessage, type AppError } from '@/lib/errors';
 import { openAllFilesAccessSettings } from '@/lib/files';
 import { pickIntoLibrary } from '@/lib/library/pickIntoLibrary';
 import { useTheme } from '@/theme';
@@ -51,9 +46,14 @@ import { statusBarStyle } from '@/theme/palette';
 
 import { shareLibraryFile } from '../files/actions';
 import { JumpToPageDialog } from './components/JumpToPageDialog';
+import { PasswordPrompt } from './components/PasswordPrompt';
 import { ReaderPage, type RenderPageOverlay } from './components/ReaderPage';
 import { THUMB_STRIP_HEIGHT, ThumbnailStrip } from './components/ThumbnailStrip';
-import { readerErrorActions, type ReaderErrorAction } from './errorActions';
+import {
+  readerErrorActions,
+  type ReaderErrorAction,
+  type ReaderOpenErrorCode,
+} from './errorActions';
 import { pageAtScroll, pageFrame, paperModeFor, type PageFrame, type Viewport } from './layout';
 import { readerHref, readerOpened } from './navigation';
 import {
@@ -108,13 +108,14 @@ export type ReaderScreenProps = {
  * The PDF reader (T2.3): every page in a recycling list, continuous vertical
  * or paged horizontal, with a page indicator, jump-to-page, a thumbnail
  * strip and a tap that toggles fullscreen. Restores the last page and mode
- * from reading_state and keeps the screen on while open.
+ * from reading_state and keeps the screen on while open. A password-protected
+ * file asks for its password first (T2.5), every time it is opened.
  */
 export function ReaderScreen({ fileId, renderOverlay }: ReaderScreenProps) {
   useKeepAwake();
   // The push from the library has landed: another file may open from now on.
   useEffect(() => readerOpened(), []);
-  const { state, retry } = useReaderDocument(fileId);
+  const { state, retry, submitPassword } = useReaderDocument(fileId);
 
   switch (state.status) {
     case 'ready':
@@ -127,6 +128,17 @@ export function ReaderScreen({ fileId, renderOverlay }: ReaderScreenProps) {
           <View testID="reader-loading" className="flex-1 items-center justify-center">
             <LoadingIndicator />
           </View>
+        </StatusFrame>
+      );
+    case 'password':
+      return (
+        <StatusFrame title={state.file.name}>
+          <PasswordPrompt
+            checking={state.checking}
+            failedAttempts={state.failedAttempts}
+            onSubmit={submitPassword}
+            onCancel={leaveReader}
+          />
         </StatusFrame>
       );
     case 'unsupported':
@@ -222,13 +234,11 @@ function TopBar({ title, mode, onToggleMode }: TopBarProps) {
 type MessageButton = { key: string; label: string; onPress: () => void };
 
 function Message({
-  icon,
   title,
   message,
   buttons,
   testID,
 }: {
-  icon?: ReactNode;
   title: string;
   message: string;
   buttons: MessageButton[];
@@ -236,7 +246,6 @@ function Message({
 }) {
   return (
     <View testID={testID} className="flex-1 items-center justify-center gap-3 px-8 py-12">
-      {icon}
       <Text
         accessibilityRole="header"
         className="w-full text-center text-lg font-semibold text-foreground"
@@ -337,15 +346,13 @@ function OpenError({
   onRetry,
 }: {
   fileId: number | null;
-  code: AppErrorCode;
+  code: ReaderOpenErrorCode;
   contentSource: boolean;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
-  const { palette } = useTheme();
   const pickAgain = usePickAgain(fileId);
   const { title, message } = toUserMessage(code);
-  const locked = code === 'PASSWORD_REQUIRED' || code === 'WRONG_PASSWORD';
 
   const button = (action: ReaderErrorAction): MessageButton => {
     switch (action) {
@@ -367,10 +374,8 @@ function OpenError({
   return (
     <Message
       testID={`reader-error-${code}`}
-      icon={locked ? <LockIcon color={palette.muted} size={48} /> : undefined}
       title={title}
-      // The password prompt arrives with T2.5; until then a locked file says so plainly.
-      message={locked ? t('reader.lockedMessage') : message}
+      message={message}
       buttons={readerErrorActions(code, { contentSource }).map(button)}
     />
   );

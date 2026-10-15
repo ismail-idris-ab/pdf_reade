@@ -7,6 +7,8 @@ import ImageToPdfScreen from '../../app/image-to-pdf';
 import OnboardingScreen from '../../app/onboarding';
 import ReaderRoute from '../../app/reader/[fileId]';
 import FileIndexModule from '../../modules/file-index/src/FileIndexModule';
+import PdfEngineModule from '../../modules/pdf-engine/src/PdfEngineModule';
+import { codedError, type FakePdfEngineModule } from '../engine/fakePdfEngine';
 import type { FakeFileIndexModule } from '../files/fakeFileIndex';
 import { getRepositories } from '@/db/client';
 import { useOnboardingStore } from '@/features/onboarding/store';
@@ -37,6 +39,7 @@ jest.mock('@/db/client', () => {
 });
 
 const native = FileIndexModule as unknown as FakeFileIndexModule;
+const engine = PdfEngineModule as unknown as FakePdfEngineModule;
 
 // The real home screen runs native spikes in dev; a stand-in keeps this test
 // about the route guard.
@@ -153,6 +156,34 @@ describe('incoming-intent routes (T1.6, reader T2.3) bypass the onboarding guard
     const fileId = getRepositories().files.getByPath('/cache/doc.pdf')?.id;
     expect(app.getPathname()).toBe(`/reader/${fileId}`);
     expect(screen.getByText('doc.pdf')).toBeOnTheScreen();
+    expect(useOnboardingStore.getState().onboardingComplete).toBe(false);
+  });
+
+  it('asks for the password of a protected PDF handed to the app before onboarding (T2.5)', async () => {
+    useOnboardingStore.setState({ onboardingComplete: false });
+    engine.open.mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'));
+    native.setLaunchIntent({
+      action: 'view',
+      uris: ['content://p/locked'],
+      mimeType: 'application/pdf',
+    });
+    native.copyContentUriToCache.mockResolvedValueOnce({
+      path: '/cache/locked.pdf',
+      name: 'locked.pdf',
+      nameFromProvider: true,
+      size: 10,
+      mime: 'application/pdf',
+    });
+
+    const app = await launch('/');
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    const fileId = getRepositories().files.getByPath('/cache/locked.pdf')?.id;
+    expect(app.getPathname()).toBe(`/reader/${fileId}`);
+    expect(screen.getByTestId('reader-password')).toBeOnTheScreen();
+    expect(screen.getByTestId('reader-password-input')).toBeOnTheScreen();
     expect(useOnboardingStore.getState().onboardingComplete).toBe(false);
   });
 });

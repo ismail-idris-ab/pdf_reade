@@ -4,6 +4,12 @@ import type { AppErrorCode } from '@/lib/errors';
 export type ReaderErrorAction =
   'retry' | 'allFilesAccess' | 'freeSpace' | 'pickAnotherFile' | 'pickAgain' | 'back';
 
+/**
+ * Open failures the error screen shows. A password-protected file never gets
+ * there: PASSWORD_REQUIRED and WRONG_PASSWORD go to the password prompt.
+ */
+export type ReaderOpenErrorCode = Exclude<AppErrorCode, 'PASSWORD_REQUIRED' | 'WRONG_PASSWORD'>;
+
 export type ReaderErrorContext = {
   /**
    * The file is read through a content:// URI (a picked or handed-over
@@ -14,7 +20,6 @@ export type ReaderErrorContext = {
 
 /**
  * Buttons for a document that could not be opened, by error code:
- * - password: the file stays locked until T2.5 adds the prompt, so only Back;
  * - damaged / unsupported / missing: choose another file (back to the library);
  * - permission on a path: grant all-files access (the only setting that can
  *   fix it), then try again; on a content:// URI the grant was lost and no
@@ -24,13 +29,10 @@ export type ReaderErrorContext = {
  * Every screen also has a way back.
  */
 export function readerErrorActions(
-  code: AppErrorCode,
+  code: ReaderOpenErrorCode,
   { contentSource }: ReaderErrorContext,
 ): ReaderErrorAction[] {
   switch (code) {
-    case 'PASSWORD_REQUIRED':
-    case 'WRONG_PASSWORD':
-      return ['back'];
     case 'CORRUPT_FILE':
     case 'UNSUPPORTED':
     case 'NOT_FOUND':

@@ -31,16 +31,27 @@ jest.mock('@shopify/flash-list/dist/recyclerview/utils/measureLayout', () => {
 // In-memory stand-in for expo-sqlite's key-value store.
 jest.mock('expo-sqlite/kv-store', () => {
   const items = new Map<string, string>();
+  const set = (key: string, value: string) => {
+    items.set(key, value);
+  };
+  const setMany = (pairs: [string, string][]) => {
+    for (const [key, value] of pairs) items.set(key, value);
+  };
   const storage = {
     getItemSync: (key: string) => items.get(key) ?? null,
-    setItemSync: (key: string, value: string) => {
-      items.set(key, value);
-    },
+    setItemSync: set,
     removeItemSync: (key: string) => items.delete(key),
+    getAllKeysSync: () => [...items.keys()],
     clearSync: () => {
       items.clear();
       return true;
     },
+    // Async writers, so a test can watch every way of writing.
+    setItem: async (key: string, value: string) => set(key, value),
+    setItemAsync: async (key: string, value: string) => set(key, value),
+    mergeItem: async (key: string, value: string) => set(key, value),
+    multiSet: async (pairs: [string, string][]) => setMany(pairs),
+    multiMerge: async (pairs: [string, string][]) => setMany(pairs),
   };
   return { __esModule: true, default: storage, Storage: storage };
 });

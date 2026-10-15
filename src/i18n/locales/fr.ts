@@ -252,8 +252,13 @@ export const fr: Catalog = {
     goToPage: 'Aller à la page {{page}}',
     switchToHorizontal: 'Passer à la lecture page par page',
     switchToVertical: 'Passer au défilement continu',
-    lockedMessage:
-      'L’ouverture des fichiers protégés par mot de passe n’est pas encore disponible.',
+    passwordLabel: 'Mot de passe',
+    showPassword: 'Afficher le mot de passe',
+    hidePassword: 'Masquer le mot de passe',
+    openWithPassword: 'Ouvrir',
+    checkingPassword: 'Vérification du mot de passe…',
+    passwordNotSaved:
+      'Le mot de passe n’est pas enregistré. Il vous sera demandé à chaque ouverture de ce fichier.',
     unsupportedMessage:
       'Pour l’instant, cette application ne lit que les fichiers PDF. Vous pouvez partager ce fichier avec une autre application capable de l’ouvrir.',
     shareToApp: 'Partager avec une autre application',

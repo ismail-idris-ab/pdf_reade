@@ -246,7 +246,13 @@ export const ha: Catalog = {
     goToPage: 'Je zuwa shafi na {{page}}',
     switchToHorizontal: 'Canja zuwa karatu shafi bayan shafi',
     switchToVertical: 'Canja zuwa gungurawa a jere',
-    lockedMessage: 'Ba a iya buɗe fayilolin da ke da kalmar sirri tukuna ba.',
+    passwordLabel: 'Kalmar sirri',
+    showPassword: 'Nuna kalmar sirri',
+    hidePassword: 'Ɓoye kalmar sirri',
+    openWithPassword: 'Buɗe',
+    checkingPassword: 'Ana duba kalmar sirri…',
+    passwordNotSaved:
+      'Ba a adana kalmar sirrin ba. Za ka buƙace ta duk lokacin da ka buɗe wannan fayil.',
     unsupportedMessage:
       'A yanzu wannan manhaja tana karanta fayilolin PDF kawai. Za ka iya tura wannan fayil zuwa wata manhajar da ke buɗe shi.',
     shareToApp: 'Tura zuwa wata manhaja',

@@ -430,18 +430,7 @@ describe('ReaderScreen — reading', () => {
 });
 
 describe('ReaderScreen — files that cannot be read', () => {
-  it('shows a locked state for a password-protected PDF, with Back', async () => {
-    const file = addFile();
-    engine.open.mockRejectedValueOnce(codedError('PASSWORD_REQUIRED'));
-    await renderReader(file.id);
-    expect(screen.getByText('This file is password-protected')).toBeOnTheScreen();
-    expect(
-      screen.getByText("Opening password-protected files isn't available yet."),
-    ).toBeOnTheScreen();
-    await act(async () => fireEvent.press(screen.getByTestId('reader-action-back')));
-    expect(router.back).toHaveBeenCalled();
-  });
-
+  // Password-protected files: ReaderPassword.test.tsx.
   it('offers another file for a damaged PDF, landing in the library when there is no back', async () => {
     jest.mocked(router.canGoBack).mockReturnValueOnce(false);
     const file = addFile();

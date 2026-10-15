@@ -209,8 +209,13 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `reader.goToPage` | Go to page {{page}} | Je zuwa shafi na {{page}} | Aller à la page {{page}} | T2.3 |
 | `reader.switchToHorizontal` | Switch to page-by-page reading | Canja zuwa karatu shafi bayan shafi | Passer à la lecture page par page | T2.3 |
 | `reader.switchToVertical` | Switch to continuous scrolling | Canja zuwa gungurawa a jere | Passer au défilement continu | T2.3 |
-| `reader.lockedMessage` | Opening password-protected files isn't available yet. | Ba a iya buɗe fayilolin da ke da kalmar sirri tukuna ba. | L’ouverture des fichiers protégés par mot de passe n’est pas encore disponible. | T2.3 |
 | `reader.unsupportedMessage` | This app reads PDF files only for now. You can share this file to another app that opens it. | A yanzu wannan manhaja tana karanta fayilolin PDF kawai. Za ka iya tura wannan fayil zuwa wata manhajar da ke buɗe shi. | Pour l’instant, cette application ne lit que les fichiers PDF. Vous pouvez partager ce fichier avec une autre application capable de l’ouvrir. | T2.3 |
 | `reader.shareToApp` | Share to another app | Tura zuwa wata manhaja | Partager avec une autre application | T2.3 |
 | `reader.zoomIn` | Zoom in | Ƙara girma | Zoom avant | T2.4 |
 | `reader.zoomOut` | Zoom out | Rage girma | Zoom arrière | T2.4 |
+| `reader.passwordLabel` | Password | Kalmar sirri | Mot de passe | T2.5 |
+| `reader.showPassword` | Show password | Nuna kalmar sirri | Afficher le mot de passe | T2.5 |
+| `reader.hidePassword` | Hide password | Ɓoye kalmar sirri | Masquer le mot de passe | T2.5 |
+| `reader.openWithPassword` | Open | Buɗe | Ouvrir | T2.5 |
+| `reader.checkingPassword` | Checking the password… | Ana duba kalmar sirri… | Vérification du mot de passe… | T2.5 |
+| `reader.passwordNotSaved` | The password isn't saved. You'll need it each time you open this file. | Ba a adana kalmar sirrin ba. Za ka buƙace ta duk lokacin da ka buɗe wannan fayil. | Le mot de passe n’est pas enregistré. Il vous sera demandé à chaque ouverture de ce fichier. | T2.5 |

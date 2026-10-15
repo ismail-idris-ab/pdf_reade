@@ -248,7 +248,12 @@ export const en = {
     goToPage: 'Go to page {{page}}',
     switchToHorizontal: 'Switch to page-by-page reading',
     switchToVertical: 'Switch to continuous scrolling',
-    lockedMessage: "Opening password-protected files isn't available yet.",
+    passwordLabel: 'Password',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
+    openWithPassword: 'Open',
+    checkingPassword: 'Checking the password…',
+    passwordNotSaved: "The password isn't saved. You'll need it each time you open this file.",
     unsupportedMessage:
       'This app reads PDF files only for now. You can share this file to another app that opens it.',
     shareToApp: 'Share to another app',

@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 
-import { readerErrorActions } from '@/features/reader/errorActions';
+import { readerErrorActions, type ReaderOpenErrorCode } from '@/features/reader/errorActions';
 import {
   clampPage,
   isReaderSupported,
@@ -145,7 +145,11 @@ describe('isReaderSupported', () => {
 });
 
 describe('readerErrorActions', () => {
-  const codes: AppErrorCode[] = [...ERROR_CODES, 'UNKNOWN'];
+  // The password codes go to the password prompt, never to the error screen.
+  const codes = ([...ERROR_CODES, 'UNKNOWN'] as AppErrorCode[]).filter(
+    (code): code is ReaderOpenErrorCode =>
+      code !== 'PASSWORD_REQUIRED' && code !== 'WRONG_PASSWORD',
+  );
 
   it.each(codes)('offers at least one way out for %s', (code) => {
     for (const contentSource of [false, true]) {
@@ -159,8 +163,6 @@ describe('readerErrorActions', () => {
 
   it('maps codes to their recovery', () => {
     const path = { contentSource: false };
-    expect(readerErrorActions('PASSWORD_REQUIRED', path)).toEqual(['back']);
-    expect(readerErrorActions('WRONG_PASSWORD', path)).toEqual(['back']);
     expect(readerErrorActions('CORRUPT_FILE', path)).toEqual(['pickAnotherFile']);
     expect(readerErrorActions('UNSUPPORTED', path)).toEqual(['pickAnotherFile']);
     expect(readerErrorActions('NOT_FOUND', path)).toEqual(['pickAnotherFile']);
