@@ -13,6 +13,8 @@ import expo.modules.kotlin.exception.CodedException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -124,7 +126,10 @@ internal class PageRenderService(
     return RenderCancellable {
       token.cancel()
       // Still waiting: it will never run, so its token is freed now.
-      if (queue.remove(job)) finish(job)
+      // Already handed to the PDFium thread but not started: cancelling the
+      // task means its body never runs, so nothing is delivered (its
+      // completion handler frees the token and pumps the next render).
+      if (queue.remove(job)) finish(job) else job.task?.cancel()
     }
   }
 
@@ -133,7 +138,11 @@ internal class PageRenderService(
     val token: RenderCancelToken,
     val onDone: (RenderOutcome<Bitmap>) -> Unit,
     val requestedAt: Long,
-  )
+  ) {
+    /** Set once [pump] has launched this render on the PDFium thread. */
+    @Volatile
+    var task: Job? = null
+  }
 
   /**
    * Feeds one render at a time onto the PDFium thread, best first (tiles,
@@ -149,16 +158,20 @@ internal class PageRenderService(
       next = queue.poll() ?: return
       running = true
     }
-    val task = scope.launch {
+    // Started lazily so [QueuedRender.task] is set before the body can run;
+    // a cancel arriving in between then reaches the task.
+    val task = scope.launch(start = CoroutineStart.LAZY) {
       // Nothing below suspends, so a finished render is always delivered.
       deliver(renderNow(next.spec, next.token, next.requestedAt), next.onDone)
     }
+    next.task = task
     // Also runs for a task cancelled before it started (destroy).
     task.invokeOnCompletion {
       finish(next)
       synchronized(pumpLock) { running = false }
       pump()
     }
+    task.start()
   }
 
   private fun finish(job: QueuedRender) {
