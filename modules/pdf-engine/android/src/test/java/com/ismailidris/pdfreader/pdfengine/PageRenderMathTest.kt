@@ -170,6 +170,9 @@ class PageRenderMathTest {
     assertEquals(TileWindow(-1080, -3056, 4320, 6112), plan.window)
     assertEquals(RenderPlan(1080, 1528), plan.tile)
     assertEquals(RenderPlan(1088, 1536), plan.bitmap)
+    // The content sits TILE_PAD_PX in from the bitmap edge.
+    assertEquals(PageRenderMath.TILE_PAD_PX, plan.pad)
+    assertEquals(TileWindow(-1080 + 4, -3056 + 4, 4320, 6112), plan.renderWindow)
     assertEquals(NormalizedRegion(0.25, 0.5, 0.25, 0.25), plan.covered)
   }
 

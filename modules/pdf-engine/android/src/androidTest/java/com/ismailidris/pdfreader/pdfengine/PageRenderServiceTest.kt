@@ -212,12 +212,18 @@ class PageRenderServiceTest {
 
     @Volatile var tilesDropped = 0
 
-    override fun displayTile(tile: Bitmap?, covered: NormalizedRegion?, content: RenderPlan?) = Unit
+    override fun displayTile(tile: Bitmap?, plan: TilePlan?) = Unit
 
     @Volatile var lastTileWaitMs = 0L
 
+    @Volatile var lastTileMs = 0L
+
+    @Volatile var lastTileAt = 0L
+
     override fun onDetailRendered(page: Int, region: NormalizedRegion, widthPx: Int, heightPx: Int, ms: Long, waitMs: Long) {
       lastTileWaitMs = waitMs
+      lastTileMs = ms
+      lastTileAt = SystemClock.elapsedRealtime()
       tiles++
     }
 
@@ -263,8 +269,12 @@ class PageRenderServiceTest {
     listOf(upright, quarter, half).forEach { service.release(it.bitmap) }
   }
 
-  /** A scanned-document page: one A4 300 dpi (2480 x 3508) photo-like JPEG filling the page. */
-  private fun scanned() = write("scanned.pdf") { document ->
+  /**
+   * Scanned-document pages: each one A4 300 dpi (2480 x 3508) photo-like JPEG
+   * filling the page. Every page gets its own JPEG stream (a different
+   * quality), so PDFium decodes each one rather than reusing a cached image.
+   */
+  private fun scanned(name: String = "scanned.pdf", pages: Int = 1) = write(name) { document ->
     val image = createBitmap(SCAN_WIDTH, SCAN_HEIGHT)
     val canvas = Canvas(image)
     val random = Random(11)
@@ -296,13 +306,15 @@ class PageRenderServiceTest {
       }
       image.setPixels(row, 0, SCAN_WIDTH, 0, y, SCAN_WIDTH, 1)
     }
-    val page = PDPage(PDRectangle.A4)
-    document.addPage(page)
-    val jpeg = JPEGFactory.createFromImage(document, image, 0.85f)
-    image.recycle()
-    PDPageContentStream(document, page).use { content ->
-      content.drawImage(jpeg, 0f, 0f, PDRectangle.A4.width, PDRectangle.A4.height)
+    for (i in 0 until pages) {
+      val page = PDPage(PDRectangle.A4)
+      document.addPage(page)
+      val jpeg = JPEGFactory.createFromImage(document, image, 0.85f - i * 0.01f)
+      PDPageContentStream(document, page).use { content ->
+        content.drawImage(jpeg, 0f, 0f, PDRectangle.A4.width, PDRectangle.A4.height)
+      }
     }
+    image.recycle()
   }
 
   /**
@@ -624,14 +636,27 @@ class PageRenderServiceTest {
 
   // region detail tiles
 
-  /** Share of pixels whose channels all differ by at most [tolerance]. */
-  /** Compares only the tile's [content] window (the rest of its 64 px bucket is never drawn). */
-  private fun matchRatio(tile: Bitmap, content: RenderPlan, full: Bitmap, offsetX: Int, offsetY: Int, tolerance: Int = 8): Double {
+  /**
+   * Share of the tile's content pixels (at ([pad], [pad]) in its bitmap,
+   * columns [fromX] until [toX]) whose channels all differ from the full
+   * render by at most [tolerance]. The pad and the rest of the bucket are
+   * never drawn, so they are not compared.
+   */
+  private fun matchRatio(
+    tile: Bitmap,
+    plan: TilePlan,
+    full: Bitmap,
+    tolerance: Int = 8,
+    fromX: Int = 0,
+    toX: Int = plan.tile.widthPx,
+  ): Double {
     var same = 0
-    for (y in 0 until content.heightPx) {
-      for (x in 0 until content.widthPx) {
-        val a = tile.getPixel(x, y)
-        val b = full.getPixel(x + offsetX, y + offsetY)
+    var total = 0
+    for (y in 0 until plan.tile.heightPx) {
+      for (x in fromX until toX) {
+        val a = tile.getPixel(x + plan.pad, y + plan.pad)
+        val b = full.getPixel(x - plan.window.startX, y - plan.window.startY)
+        total++
         if (abs(Color.red(a) - Color.red(b)) <= tolerance && abs(Color.green(a) - Color.green(b)) <= tolerance &&
           abs(Color.blue(a) - Color.blue(b)) <= tolerance
         ) {
@@ -639,18 +664,27 @@ class PageRenderServiceTest {
         }
       }
     }
-    return same.toDouble() / content.pixels
+    return same.toDouble() / total
   }
 
+  /**
+   * The tile must reproduce the full render, including at its left edge:
+   * unpadded, glyphs crossing bitmap column 0 rasterised differently in an
+   * 8 px band (99.09% overall, up to 136 levels off; see
+   * PageRenderMath.TILE_PAD_PX). With the pad the device matched 100%; the
+   * 99.9% bar leaves room only for isolated anti-aliasing differences.
+   */
   private fun assertTileMatchesFull(service: PageRenderService, docId: String, page: Int, viewW: Int, viewH: Int, region: NormalizedRegion) {
     val roomy = RenderCaps(maxPixels = 100_000_000L, maxSide = 100_000)
     val plan = PageRenderMath.tilePlan(viewW, viewH, 1f, 1.0, region, roomy)!!
     val full = rendered(render(service, RenderSpec(docId, page, RenderPlan(viewW, viewH))))
-    val tile = rendered(render(service, RenderSpec(docId, page, plan.bitmap, plan.window)))
+    val tile = rendered(render(service, RenderSpec(docId, page, plan.bitmap, plan.renderWindow)))
     assertEquals(plan.bitmap.widthPx, tile.bitmap.width)
-    val ratio = matchRatio(tile.bitmap, plan.tile, full.bitmap, -plan.window.startX, -plan.window.startY)
-    Log.i(BENCH_TAG, "tile vs full render: ${"%.4f".format(ratio * 100)}% of pixels within tolerance")
-    assertTrue("only ${ratio * 100}% of tile pixels match the full render", ratio >= 0.995)
+    val ratio = matchRatio(tile.bitmap, plan, full.bitmap)
+    val leftBand = matchRatio(tile.bitmap, plan, full.bitmap, toX = minOf(8, plan.tile.widthPx))
+    Log.i(BENCH_TAG, "tile vs full render: ${"%.4f".format(ratio * 100)}% match, left 8 px band ${"%.4f".format(leftBand * 100)}%")
+    assertTrue("only ${ratio * 100}% of tile pixels match the full render", ratio >= 0.999)
+    assertTrue("left edge band only ${leftBand * 100}%", leftBand >= 0.999)
     service.release(full.bitmap)
     service.release(tile.bitmap)
   }
@@ -677,9 +711,9 @@ class PageRenderServiceTest {
     val region = NormalizedRegion(0.8, 0.0, 0.2, 0.25)
     assertTileMatchesFull(service, opened.docId, 0, 792, 612, region)
     val plan = PageRenderMath.tilePlan(792, 612, 1f, 1.0, region, service.tileCaps)!!
-    val tile = rendered(render(service, RenderSpec(opened.docId, 0, plan.bitmap, plan.window)))
-    assertTrue("marker in the tile's top-right", isDark(tile.bitmap.getPixel(plan.tile.widthPx - 30, 30)))
-    assertTrue(isLight(tile.bitmap.getPixel(10, plan.tile.heightPx - 10)))
+    val tile = rendered(render(service, RenderSpec(opened.docId, 0, plan.bitmap, plan.renderWindow)))
+    assertTrue("marker in the tile's top-right", isDark(tile.bitmap.getPixel(plan.pad + plan.tile.widthPx - 30, plan.pad + 30)))
+    assertTrue(isLight(tile.bitmap.getPixel(plan.pad + 10, plan.pad + plan.tile.heightPx - 10)))
     service.release(tile.bitmap)
   }
 
@@ -688,7 +722,7 @@ class PageRenderServiceTest {
     val opened = open(heavy())
     val service = service()
     val plan = PageRenderMath.tilePlan(2448, 3168, 1f, 1.0, NormalizedRegion(0.25, 0.25, 0.5, 0.5), service.tileCaps)!!
-    val spec = RenderSpec(opened.docId, 0, plan.bitmap, plan.window)
+    val spec = RenderSpec(opened.docId, 0, plan.bitmap, plan.renderWindow)
     val full = rendered(render(service, spec))
     service.release(full.bitmap)
     val started = CountDownLatch(1)
@@ -714,7 +748,7 @@ class PageRenderServiceTest {
     for (step in 0 until 5) {
       val region = NormalizedRegion(0.1 + step * 0.0007, 0.2 + step * 0.0011, 0.25, 0.39)
       val plan = PageRenderMath.tilePlan(view.widthPx, view.heightPx, view.density, 2.625, region, service.tileCaps)!!
-      val tile = rendered(render(service, RenderSpec(opened.docId, 0, plan.bitmap, plan.window)))
+      val tile = rendered(render(service, RenderSpec(opened.docId, 0, plan.bitmap, plan.renderWindow)))
       previous?.let { assertTrue("pan step $step reused the pooled tile", it === tile.bitmap) }
       previous = tile.bitmap
       service.release(tile.bitmap)
@@ -778,7 +812,7 @@ class PageRenderServiceTest {
       val plan = PageRenderMath.tilePlan(view.widthPx, view.heightPx, density, density.toDouble(), viewport, service.tileCaps)!!
       val times = ArrayList<Long>()
       repeat(6) { page ->
-        val tile = rendered(render(service, RenderSpec(opened.docId, page, plan.bitmap, plan.window)))
+        val tile = rendered(render(service, RenderSpec(opened.docId, page, plan.bitmap, plan.renderWindow)))
         times.add(tile.ms)
         service.release(tile.bitmap)
       }
@@ -854,6 +888,70 @@ class PageRenderServiceTest {
     )
     instrumentation.runOnMainSync { cells.forEach { it.dispose() } }
     assertEquals(0, host.errors)
+  }
+
+  /**
+   * Benchmark mirroring the reader on a scanned book: three pages shown at 1×,
+   * then a double-tap to 2.5× (every mounted page resized, a detail region on
+   * the visible one) while two pages newly mounted at 2.5× queue backdrops
+   * just before the tile. The shown 1× bitmaps are kept as backdrops (no
+   * render), and the tile goes ahead of the queued backdrops, so it waits at
+   * most for the one render already running.
+   */
+  @Test
+  fun scannedZoomInTileWaitsForAtMostOneRender() {
+    val opened = open(scanned("scanned-book.pdf", pages = 5))
+    val service = service()
+    val recorder = WaitRecorder(service)
+    val host = CountingHost()
+    val density = 2.625f
+    val oneX = ViewSize(1080, Math.round(1080 * 842f / 595f), density)
+    val zoomedSize = ViewSize(2700, Math.round(2700 * 842f / 595f), density)
+    val viewport = NormalizedRegion(0.3, 0.0, 1080.0 / zoomedSize.widthPx, 2400.0 / zoomedSize.heightPx)
+    val cells = ArrayList<PageRenderController<Bitmap>>()
+    instrumentation.runOnMainSync {
+      repeat(3) { page ->
+        cells.add(PageRenderController(recorder, host).also { it.update(PageViewProps(opened.docId, page, density.toDouble()), oneX) })
+      }
+    }
+    awaitCondition("1× pages never rendered", timeoutMs = 30_000) { host.renders == 3 }
+    val oneXMs = recorder.waits.size
+    val pageRendersBefore = host.renders
+    var zoomAt = 0L
+    instrumentation.runOnMainSync {
+      zoomAt = SystemClock.elapsedRealtime()
+      // Two cells mount at 2.5× with nothing shown: their backdrops queue first.
+      repeat(2) { i ->
+        cells.add(
+          PageRenderController(recorder, host).also {
+            it.update(PageViewProps(opened.docId, 3 + i, density.toDouble()), zoomedSize)
+          },
+        )
+      }
+      // The double-tap: all three shown pages resize; page 1 is the visible one.
+      cells[0].update(PageViewProps(opened.docId, 0, density.toDouble()), zoomedSize)
+      cells[1].update(PageViewProps(opened.docId, 1, density.toDouble(), detailRegion = viewport), zoomedSize)
+      cells[2].update(PageViewProps(opened.docId, 2, density.toDouble()), zoomedSize)
+    }
+    awaitCondition("tile never arrived", timeoutMs = 30_000) { host.tiles == 1 }
+    val toTile = host.lastTileAt - zoomAt
+    awaitCondition("backdrops never finished", timeoutMs = 30_000) {
+      var busy = false
+      instrumentation.runOnMainSync { busy = cells.any { it.isRendering || it.isRenderingTile } }
+      !busy
+    }
+    val reRendered = host.renders - pageRendersBefore - 2
+    Log.i(
+      BENCH_TAG,
+      "scanned zoom-in 1x->2.5x: tile ${host.lastTileMs} ms render, waited ${host.lastTileWaitMs} ms in queue, " +
+        "$toTile ms from zoom to tile on screen; shown pages re-rendered: $reRendered; " +
+        "new-cell backdrop waits ${recorder.waits["3:page"]}/${recorder.waits["4:page"]} ms ($oneXMs 1x renders before)",
+    )
+    assertEquals("kept 1× bitmaps are not re-rendered on zoom-in", 0, reRendered)
+    // At most the one backdrop already running when the tile was queued.
+    assertTrue("tile waited ${host.lastTileWaitMs} ms", host.lastTileWaitMs <= host.lastTileMs * 2 + 100)
+    assertEquals(0, host.errors)
+    instrumentation.runOnMainSync { cells.forEach { it.dispose() } }
   }
 
   // endregion

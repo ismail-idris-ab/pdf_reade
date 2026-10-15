@@ -53,6 +53,11 @@ internal class PageRenderService(
   }
   private val scope = CoroutineScope(SupervisorJob() + pdfiumDispatcher + uncaughtHandler)
   private val active: MutableSet<RenderCancelToken> = ConcurrentHashMap.newKeySet()
+  private val queue = RenderJobQueue<QueuedRender>()
+  private val pumpLock = Any()
+
+  // Guarded by pumpLock: a render task is on (or queued for) the PDFium thread.
+  private var running = false
   private val destroyed = AtomicBoolean(false)
 
   private val idleTrim = PoolIdleTrim(
@@ -113,20 +118,52 @@ internal class PageRenderService(
       return RenderCancellable {}
     }
     active.add(token)
-    val requestedAt = SystemClock.elapsedRealtime()
-    val job = scope.launch {
-      // Nothing below suspends, so a finished render is always delivered.
-      deliver(renderNow(spec, token, requestedAt), onDone)
-    }
-    // Also runs for a job cancelled before it started (its body never runs).
-    job.invokeOnCompletion {
-      active.remove(token)
-      token.close()
-    }
+    val job = QueuedRender(spec, token, onDone, SystemClock.elapsedRealtime())
+    queue.add(job, if (spec.window != null) RenderJobQueue.PRIORITY_TILE else RenderJobQueue.PRIORITY_PAGE)
+    pump()
     return RenderCancellable {
       token.cancel()
-      job.cancel()
+      // Still waiting: it will never run, so its token is freed now.
+      if (queue.remove(job)) finish(job)
     }
+  }
+
+  private class QueuedRender(
+    val spec: RenderSpec,
+    val token: RenderCancelToken,
+    val onDone: (RenderOutcome<Bitmap>) -> Unit,
+    val requestedAt: Long,
+  )
+
+  /**
+   * Feeds one render at a time onto the PDFium thread, best first (tiles,
+   * then pages; FIFO within each). Each render is its own task on
+   * [pdfiumDispatcher], so thumbnail and search work queued there runs
+   * between renders, and a tile requested while pages wait goes next instead
+   * of behind them.
+   */
+  private fun pump() {
+    val next: QueuedRender
+    synchronized(pumpLock) {
+      if (running || destroyed.get()) return
+      next = queue.poll() ?: return
+      running = true
+    }
+    val task = scope.launch {
+      // Nothing below suspends, so a finished render is always delivered.
+      deliver(renderNow(next.spec, next.token, next.requestedAt), next.onDone)
+    }
+    // Also runs for a task cancelled before it started (destroy).
+    task.invokeOnCompletion {
+      finish(next)
+      synchronized(pumpLock) { running = false }
+      pump()
+    }
+  }
+
+  private fun finish(job: QueuedRender) {
+    active.remove(job.token)
+    job.token.close()
   }
 
   override fun release(bitmap: Bitmap) {
@@ -138,6 +175,7 @@ internal class PageRenderService(
   fun destroy() {
     if (!destroyed.compareAndSet(false, true)) return
     active.forEach { it.cancel() }
+    queue.drain().forEach(::finish)
     scope.cancel()
     idleTrim.cancel()
     pool.checkedOutListener = null

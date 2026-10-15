@@ -75,11 +75,11 @@ internal interface PageRenderHost<B : Any> {
   fun display(bitmap: B?)
 
   /**
-   * Draws the top-left [content] px of [tile] over [covered] (normalized to
-   * the view's bounds), or no tile when null. The rest of the bitmap (its
-   * 64 px bucket) is not drawn.
+   * Draws [tile]'s content window ([plan] .tile at (pad, pad)) over
+   * [plan].covered (normalized to the view's bounds), or no tile when null.
+   * The rest of the bitmap (pad and 64 px bucket) is not drawn.
    */
-  fun displayTile(tile: B?, covered: NormalizedRegion?, content: RenderPlan?)
+  fun displayTile(tile: B?, plan: TilePlan?)
 
   fun onRendered(page: Int, widthPx: Int, heightPx: Int, ms: Long)
 
@@ -253,13 +253,16 @@ internal class PageRenderController<B : Any>(
     val caps = if (zoomed) backend.backdropCaps else backend.caps
     val plan = PageRenderMath.plan(viewSize.widthPx, viewSize.heightPx, viewSize.density, current.renderScale, caps)
       ?: return
-    // Every zoom step resizes every mounted page; when the capped plan is the
-    // bitmap already shown for this page (same aspect, checked above), it is
-    // only drawn at a new size: no render, and nothing queues ahead of tiles.
-    if (shown != null && shownPage == current.docId to current.page &&
-      shownWidthPx == plan.widthPx && shownHeightPx == plan.heightPx
-    ) {
-      return
+    // Every zoom step resizes every mounted page. The bitmap already shown for
+    // this page (same aspect, checked above) is only drawn at the new size, with
+    // no render, when it is the planned size, or when the page is zoomed and
+    // the shown bitmap is at least [KEEP_AS_BACKDROP_SHARE] of the backdrop
+    // plan: the 1x bitmap kept on zoom-in is the backdrop (a backdrop render
+    // would be a downgrade or a <15% linear gain, at ~400 ms per scanned page).
+    if (shown != null && shownPage == current.docId to current.page) {
+      val shownPixels = shownWidthPx.toLong() * shownHeightPx
+      val samePlan = shownWidthPx == plan.widthPx && shownHeightPx == plan.heightPx
+      if (samePlan || (zoomed && shownPixels >= plan.pixels * KEEP_AS_BACKDROP_SHARE)) return
     }
     val ticket = generation
     inFlight = backend.render(RenderSpec(current.docId, current.page, plan)) { outcome ->
@@ -290,7 +293,7 @@ internal class PageRenderController<B : Any>(
     tileGeneration++
     cancelTileInFlight()
     val ticket = tileGeneration
-    tileInFlight = backend.render(RenderSpec(current.docId, current.page, plan.bitmap, plan.window)) { outcome ->
+    tileInFlight = backend.render(RenderSpec(current.docId, current.page, plan.bitmap, plan.renderWindow)) { outcome ->
       onTileOutcome(ticket, current, region, plan, viewSize, outcome)
     }
   }
@@ -358,7 +361,7 @@ internal class PageRenderController<B : Any>(
         tile = outcome.bitmap
         tilePage = request.docId to request.page
         tileCovered = plan.covered
-        host.displayTile(outcome.bitmap, plan.covered, plan.tile)
+        host.displayTile(outcome.bitmap, plan)
         host.onDetailRendered(request.page, region, plan.tile.widthPx, plan.tile.heightPx, outcome.ms, outcome.waitMs)
       }
       is RenderOutcome.Failed -> {
@@ -412,7 +415,7 @@ internal class PageRenderController<B : Any>(
     tile = null
     tilePage = null
     tileCovered = null
-    host.displayTile(null, null, null)
+    host.displayTile(null, null)
     retire(bitmap)
   }
 
@@ -427,5 +430,8 @@ internal class PageRenderController<B : Any>(
   private companion object {
     /** Pixel rounding and the cap's floor move the aspect ratio far less than this. */
     const val ASPECT_TOLERANCE = 0.01
+
+    /** A zoomed page keeps a shown bitmap with at least this share of the backdrop plan's pixels. */
+    const val KEEP_AS_BACKDROP_SHARE = 0.75
   }
 }

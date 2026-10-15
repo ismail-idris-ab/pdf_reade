@@ -127,12 +127,22 @@ internal object PageRenderMath {
 
   /**
    * Detail tile caps: a quarter of the budget each, at most [MAX_TILE_PIXELS].
-   * Zoomed reading holds at most two visible pages: two backdrops at 1/8 plus
-   * three tiles at 1/4 (one per visible page, plus one being replaced) is
-   * 2/8 + 3/4 = the whole budget. On a 32 MB pool a tile is 2 Mi px: a 720p
-   * viewport (1.15 MP) at full scale, a 1080 x 2400 one (2.6 MP) at 0.9x
-   * linear (it was 0.64x at 1/8). Tiles are 64 px buckets
-   * ([TILE_BUCKET_PX]); the cap is checked on the bucket.
+   * On a 32 MB pool a tile is 2 Mi px: a 720p viewport (1.15 MP) at full
+   * scale, a 1080 x 2400 one (2.6 MP) at 0.9x linear. Tiles are 64 px
+   * buckets ([TILE_BUCKET_PX]); the cap is checked on the bucket.
+   *
+   * Worst case in use while zoomed, with at most two pages visible:
+   * - pages: a page zoomed in keeps its 1x bitmap as backdrop (no render;
+   *   see PageRenderController), so two pages hold at most 2 x 1/4 of the
+   *   budget; a backdrop rendered fresh is smaller (1/8).
+   * - tiles: each covers its page's visible part, so the shown tiles together
+   *   cover at most one viewport, and the replacements in flight another:
+   *   at most 2 viewports of pixels (each tile also capped at 1/4).
+   * 720p on 32 MB: 16 MB + 2 x 4.6 MB = 25 MB. 1080 x 2400 on 64 MB (its
+   * usual class): 32 MB + 2 x 10.4 MB = 53 MB. 1080 x 2400 on a 32 MB pool
+   * would reach 37 MB during a tile swap, 15% over the soft budget, for one
+   * frame-to-render interval; checked-out bitmaps may exceed it (see
+   * BitmapPool) and every bitmap stays under its own cap.
    */
   fun tileCapsFor(poolBudgetBytes: Long): RenderCaps {
     val byBudget = poolBudgetBytes / 4 / BYTES_PER_PIXEL
@@ -205,7 +215,8 @@ internal object PageRenderMath {
     val right = ceil((region.x + region.width) * pageW - FLOOR_EPSILON).toInt().coerceIn(left + 1, pageW)
     val bottom = ceil((region.y + region.height) * pageH - FLOOR_EPSILON).toInt().coerceIn(top + 1, pageH)
     val content = RenderPlan(right - left, bottom - top)
-    return TilePlan(content, TileWindow(-left, -top, pageW, pageH), RenderPlan(bucket(content.widthPx), bucket(content.heightPx)))
+    val bitmap = RenderPlan(bucket(content.widthPx + TILE_PAD_PX), bucket(content.heightPx + TILE_PAD_PX))
+    return TilePlan(content, TileWindow(-left, -top, pageW, pageH), bitmap, TILE_PAD_PX)
   }
 
   /** [side] rounded up to a whole [TILE_BUCKET_PX], so tiles of similar size share pooled bitmaps. */
@@ -216,6 +227,16 @@ internal object PageRenderMath {
 
   /** Tile bitmaps are whole multiples of this many px on each side, for pool reuse. */
   const val TILE_BUCKET_PX = 64
+
+  /**
+   * The tile content starts this many px into its bitmap. PDFium rasterises
+   * glyphs that cross the bitmap's left edge (column 0) differently from the
+   * same glyphs in a full render: on device, an 8 px band at the tile's left
+   * edge differed by up to 136 levels (a visible seam). With the page drawn
+   * from 1 px or more inside the bitmap the tile matched the full render
+   * exactly, so the edge is padded and never drawn; 4 px leaves margin.
+   */
+  const val TILE_PAD_PX = 4
 
   /** Below this share of the wanted width the page bitmap counts as capped (rounding stays above it). */
   private const val CAPPED_RATIO = 0.98
@@ -316,11 +337,16 @@ internal data class NormalizedRegion(val x: Double, val y: Double, val width: Do
 internal data class TileWindow(val startX: Int, val startY: Int, val pageWidthPx: Int, val pageHeightPx: Int)
 
 /**
- * A detail tile: [tile] is the content (the window over the region), drawn
- * from the top-left of a [bitmap] rounded up to 64 px buckets; the rest of
- * the bitmap holds more of the page and is never drawn.
+ * A detail tile. [tile] is the content: the pixel-aligned window over the
+ * region, at [window] in the full page image. In the [bitmap] (rounded up to
+ * 64 px buckets) the content starts at ([pad], [pad]); everything around it
+ * is more of the page and is never drawn. Render with [renderWindow].
  */
-internal data class TilePlan(val tile: RenderPlan, val window: TileWindow, val bitmap: RenderPlan = tile) {
+internal data class TilePlan(val tile: RenderPlan, val window: TileWindow, val bitmap: RenderPlan = tile, val pad: Int = 0) {
+  /** Where PDFium draws the page in [bitmap]: the content window moved in by [pad]. */
+  val renderWindow: TileWindow
+    get() = window.copy(startX = window.startX + pad, startY = window.startY + pad)
+
   /** The page area the tile actually covers (pixel-aligned, so a little more than the region). */
   val covered: NormalizedRegion
     get() = NormalizedRegion(

@@ -63,10 +63,14 @@ class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, 
       send("onRenderError") { onRenderError(mapOf("page" to page, "code" to code)) }
     }
 
-    override fun displayTile(tile: Bitmap?, covered: NormalizedRegion?, content: RenderPlan?) {
+    override fun displayTile(tile: Bitmap?, plan: TilePlan?) {
       this@PdfPageView.tile = tile
-      tileArea = covered
-      if (content == null) tileSource.setEmpty() else tileSource.set(0, 0, content.widthPx, content.heightPx)
+      tileArea = plan?.covered
+      if (plan == null) {
+        tileSource.setEmpty()
+      } else {
+        tileSource.set(plan.pad, plan.pad, plan.pad + plan.tile.widthPx, plan.pad + plan.tile.heightPx)
+      }
       invalidate()
     }
 
@@ -169,7 +173,7 @@ class PdfPageView(context: Context, appContext: AppContext) : ExpoView(context, 
         ((area.x + area.width) * width).toFloat(),
         ((area.y + area.height) * height).toFloat(),
       )
-      // Only the content window; the rest of the 64 px bucket is not part of the tile.
+      // Only the content window; the pad and the rest of the bucket are not part of the tile.
       canvas.drawBitmap(detail, tileSource, tileDestination, paint)
     }
   }

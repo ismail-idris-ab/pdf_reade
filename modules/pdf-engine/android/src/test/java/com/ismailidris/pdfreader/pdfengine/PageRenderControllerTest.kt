@@ -71,10 +71,10 @@ class PageRenderControllerTest {
 
     var tileContent: RenderPlan? = null
 
-    override fun displayTile(tile: Bmp?, covered: NormalizedRegion?, content: RenderPlan?) {
+    override fun displayTile(tile: Bmp?, plan: TilePlan?) {
       this.tile = tile
-      tileArea = covered
-      tileContent = content
+      tileArea = plan?.covered
+      tileContent = plan?.tile
     }
 
     override fun onDetailRendered(page: Int, region: NormalizedRegion, widthPx: Int, heightPx: Int, ms: Long, waitMs: Long) {
@@ -173,10 +173,11 @@ class PageRenderControllerTest {
     controller.update(props(scale = 2.625), size)
     val low = Bmp("low")
     backend.complete(0, low)
-    controller.update(props(scale = 5.25), size)
+    // 4 px/dp: 1646 x 2327 = 3.8 MP, under the 4 MP page cap (above it the
+    // page is zoomed and keeps this bitmap as its backdrop).
+    controller.update(props(scale = 4.0), size)
     assertSame("old bitmap stays while re-rendering", low, controller.displayed)
-    // 5.25 px/dp would be 6.6 MP: lowered to the 4 MP cap.
-    assertTrue(backend.started[1].spec.plan.pixels <= 4_000_000L)
+    assertEquals(RenderPlan(1646, 2327), backend.started[1].spec.plan)
     val high = Bmp("high")
     backend.complete(1, high)
     assertSame(high, controller.displayed)
@@ -430,8 +431,9 @@ class PageRenderControllerTest {
     controller.update(tileProps(topLeft), zoomed)
     assertEquals(1, tileIndices().size)
     val spec = backend.started[tileIndices()[0]].spec
-    assertEquals(TileWindow(0, 0, 4320, 6112), spec.window)
-    // The bitmap is the 64 px bucket around the 1080 x 1528 content.
+    // Rendered 4 px in from the bitmap edge (TILE_PAD_PX).
+    assertEquals(TileWindow(4, 4, 4320, 6112), spec.window)
+    // The bitmap is the 64 px bucket around the padded 1080 x 1528 content.
     assertEquals(RenderPlan(1088, 1536), spec.plan)
     assertEquals("region alone does not re-render the page", 2, pageIndices().size)
   }
@@ -613,6 +615,27 @@ class PageRenderControllerTest {
     backend.complete(0, first)
     controller.update(PageViewProps("doc", 0, 1.0), ViewSize(30, 42, 1f))
     assertSame("kept: within one pixel", first, controller.displayed)
+  }
+
+  @Test
+  fun zoomingInKeepsTheShownPageAsTheBackdrop() {
+    controller.update(tileProps(null), size)
+    val oneX = Bmp("1x")
+    backend.complete(0, oneX)
+    // Zoom to 4×: capped, the 1× bitmap (1.65 MP) is more than the 1 MP backdrop.
+    controller.update(tileProps(topLeft), zoomed)
+    assertEquals("no backdrop render on zoom-in", 1, pageIndices().size)
+    assertSame(oneX, controller.displayed)
+    assertEquals("only the tile renders", 1, tileIndices().size)
+  }
+
+  @Test
+  fun aMuchSmallerShownPageIsReplacedByABackdrop() {
+    // A tiny earlier bitmap (0.2 MP) of the same page and aspect.
+    controller.update(PageViewProps("doc", 0, 1.0), ViewSize(384, 543, 1f))
+    backend.complete(0, Bmp("tiny"))
+    controller.update(tileProps(topLeft), zoomed)
+    assertEquals(2, pageIndices().size)
   }
 
   // endregion
