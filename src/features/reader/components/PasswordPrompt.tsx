@@ -16,6 +16,9 @@ import { useTheme } from '@/theme';
 
 import { useKeyboardOverlap, type MeasureInWindow } from '../useKeyboardOverlap';
 
+/** Wait after a rejection before the field is focused again, ms. */
+export const REFOCUS_DELAY_MS = 100;
+
 export type PasswordPromptProps = {
   /** A submitted password is being tried. */
   checking: boolean;
@@ -87,8 +90,19 @@ export function PasswordPrompt({
   useEffect(() => {
     // With a screen reader, moving focus would cut off the error announcement
     // (it is also the field's hint); the user moves there themselves.
-    if (failedAttempts > 0 && !screenReader) inputRef.current?.focus();
-  }, [failedAttempts, screenReader]);
+    if (failedAttempts === 0 || checking || screenReader) return undefined;
+    // After a rejection the field can still hold focus while Android has
+    // already closed the keyboard, and focus() on a focused field does
+    // nothing. Once the re-render has settled, blur and focus again: that
+    // always brings the keyboard back for the next try.
+    const timer = setTimeout(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      if (input.isFocused()) input.blur();
+      input.focus();
+    }, REFOCUS_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [failedAttempts, checking, screenReader]);
 
   // Leaving the foreground hides a shown password.
   useEffect(() => {

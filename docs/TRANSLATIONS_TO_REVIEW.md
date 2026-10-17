@@ -11,6 +11,7 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 - Units: French uses o/Ko/Mo/Go; Hausa drafts keep B/KB/MB/GB. Please confirm what Hausa readers expect.
 - T1.4 `folders.deleteTitleWithItems_*` and `folders.importFailed_*` (`_one` / `_many` / `_other`) are i18next plural forms chosen by `count` (items in the folder; files that failed to import). CLDR: English and Hausa use one/other; French also uses "many" for very large round counts. Every catalogue has all three so the keys match; please check each form, the Hausa singulars in particular.
 - T1.4 `folders.imported` still avoids plural forms ("({{count}})"); please suggest wording that reads naturally for a count of 1.
+- T2.6 `reader.search.results_*` and `reader.search.resultsSoFar_*` are plural forms chosen by the match count; `{{value}}` is that count already formatted for the language (e.g. "10,000" / "10 000"). `resultsCapped` and `positionCapped` add "+" after a capped count of 10,000; please check the "+" reads naturally. `reader.contents.*` is the document's table of contents ("Sommaire" in French).
 - T1.4 `names.invalidChars` lists the forbidden characters literally (\ / : * ? " < > |); keep them unchanged.
 
 ## Pending keys
@@ -219,3 +220,44 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `reader.openWithPassword` | Open | Buɗe | Ouvrir | T2.5 |
 | `reader.checkingPassword` | Checking the password… | Ana duba kalmar sirri… | Vérification du mot de passe… | T2.5 |
 | `reader.passwordNotSaved` | The password isn't saved. You'll need it each time you open this file. | Ba a adana kalmar sirrin ba. Za ka buƙace ta duk lokacin da ka buɗe wannan fayil. | Le mot de passe n’est pas enregistré. Il vous sera demandé à chaque ouverture de ce fichier. | T2.5 |
+| `reader.search.open` | Search in document | Nemi a cikin takarda | Rechercher dans le document | T2.6 |
+| `reader.search.placeholder` | Find in document | Nemi a cikin takarda | Rechercher dans le document | T2.6 |
+| `reader.search.fieldLabel` | Text to find | Rubutun da za a nema | Texte à rechercher | T2.6 |
+| `reader.search.clear` | Clear search text | Share rubutun nema | Effacer le texte recherché | T2.6 |
+| `reader.search.close` | Close search | Rufe nema | Fermer la recherche | T2.6 |
+| `reader.search.matchCase` | Match case | Bambanta manyan da ƙananan haruffa | Respecter la casse | T2.6 |
+| `reader.search.wholeWord` | Whole words only | Cikakkun kalmomi kawai | Mots entiers uniquement | T2.6 |
+| `reader.search.next` | Next result | Sakamako na gaba | Résultat suivant | T2.6 |
+| `reader.search.previous` | Previous result | Sakamakon da ya gabata | Résultat précédent | T2.6 |
+| `reader.search.searching` | Searching… | Ana nema… | Recherche… | T2.6 |
+| `reader.search.progress` | Searching… {{page}} of {{total}} | Ana nema… {{page}} cikin {{total}} | Recherche… {{page}} sur {{total}} | T2.6 |
+| `reader.search.results_one` | {{value}} result | Sakamako {{value}} | {{value}} résultat | T2.6 |
+| `reader.search.results_many` | {{value}} results | Sakamako {{value}} | {{value}} de résultats | T2.6 |
+| `reader.search.results_other` | {{value}} results | Sakamako {{value}} | {{value}} résultats | T2.6 |
+| `reader.search.resultsCapped` | {{value}}+ results | Sakamako {{value}}+ | {{value}}+ résultats | T2.6 |
+| `reader.search.resultsSoFar_one` | {{value}} result so far | Sakamako {{value}} zuwa yanzu | {{value}} résultat pour l’instant | T2.6 |
+| `reader.search.resultsSoFar_many` | {{value}} results so far | Sakamako {{value}} zuwa yanzu | {{value}} de résultats pour l’instant | T2.6 |
+| `reader.search.resultsSoFar_other` | {{value}} results so far | Sakamako {{value}} zuwa yanzu | {{value}} résultats pour l’instant | T2.6 |
+| `reader.search.position` | Result {{current}} of {{total}} | Sakamako {{current}} cikin {{total}} | Résultat {{current}} sur {{total}} | T2.6 |
+| `reader.search.positionCapped` | Result {{current}} of {{total}}+ | Sakamako {{current}} cikin {{total}}+ | Résultat {{current}} sur {{total}}+ | T2.6 |
+| `reader.search.noResults` | No results | Babu sakamako | Aucun résultat | T2.6 |
+| `reader.contents.open` | Contents | Abubuwan ciki | Sommaire | T2.6 |
+| `reader.contents.loading` | Loading contents | Ana loda abubuwan ciki | Chargement du sommaire | T2.6 |
+| `reader.contents.expand` | Show sections in {{title}} | Nuna sassan da ke cikin {{title}} | Afficher les sections de {{title}} | T2.6 |
+| `reader.contents.collapse` | Hide sections in {{title}} | Ɓoye sassan da ke cikin {{title}} | Masquer les sections de {{title}} | T2.6 |
+| `reader.contents.itemPage` | Page {{page}} | Shafi {{page}} | Page {{page}} | T2.6 |
+| `reader.contents.noPage` | Not linked to a page | Ba a haɗa shi da wani shafi ba | Sans lien vers une page | T2.6 |
+| `reader.contents.current` | You are here | Kana nan | Vous êtes ici | T2.6 |
+| `reader.bookmarks.add` | Bookmark this page | Yi wa wannan shafi alama | Ajouter un signet à cette page | T2.6 |
+| `reader.bookmarks.title` | Bookmarks | Alamomin shafi | Signets | T2.6 |
+| `reader.bookmarks.page` | Page {{page}} | Shafi {{page}} | Page {{page}} | T2.6 |
+| `reader.bookmarks.addedOn` | Added {{date}} | An ƙara {{date}} | Ajouté le {{date}} | T2.6 |
+| `reader.bookmarks.goHint` | Goes to this page | Yana kai ka wannan shafi | Affiche cette page | T2.6 |
+| `reader.bookmarks.remove` | Remove bookmark, page {{page}} | Cire alamar shafi, shafi {{page}} | Supprimer le signet, page {{page}} | T2.6 |
+| `reader.bookmarks.added` | Page {{page}} bookmarked | An yi wa shafi {{page}} alama | Signet ajouté à la page {{page}} | T2.6 |
+| `reader.bookmarks.removed` | Bookmark removed from page {{page}} | An cire alamar shafi {{page}} | Signet retiré de la page {{page}} | T2.6 |
+| `reader.bookmarks.undo` | Undo | Mayar | Annuler | T2.6 |
+| `reader.bookmarks.emptyTitle` | No bookmarks yet | Babu alamomin shafi tukuna | Aucun signet pour l’instant | T2.6 |
+| `reader.bookmarks.emptyMessage` | Use the bookmark button at the top to save the page you are reading. | Yi amfani da maɓallin alama da ke sama don adana shafin da kake karantawa. | Utilisez le bouton signet en haut de l’écran pour garder la page que vous lisez. | T2.6 |
+| `reader.menu.more` | More options | Ƙarin zaɓuɓɓuka | Plus d’options | T2.6 |
+| `reader.menu.title` | Reading options | Zaɓuɓɓukan karatu | Options de lecture | T2.6 |

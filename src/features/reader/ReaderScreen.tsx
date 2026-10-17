@@ -15,6 +15,7 @@ import {
 import {
   ActivityIndicator,
   AppState,
+  BackHandler,
   Linking,
   Pressable,
   ScrollView,
@@ -30,7 +31,14 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { showErrorToast } from '@/components/errorToast';
-import { ArrowBackIcon, HorizontalPagesIcon, VerticalPagesIcon } from '@/components/icons';
+import {
+  ArrowBackIcon,
+  BookmarkFilledIcon,
+  BookmarkIcon,
+  MoreVertIcon,
+  SearchIcon,
+  TocIcon,
+} from '@/components/icons';
 import { Button, IconButton, toast } from '@/components/ui';
 import { getRepositories } from '@/db/client';
 import type { ReadingMode } from '@/db/schema';
@@ -45,9 +53,15 @@ import { useTheme } from '@/theme';
 import { statusBarStyle } from '@/theme/palette';
 
 import { shareLibraryFile } from '../files/actions';
+import { createBookmarkActions, type BookmarkActions } from './bookmarks';
+import { INDICATOR_HEIGHT, SEARCH_TOOLS_HEIGHT, TOP_BAR_HEIGHT } from './chrome';
 import { JumpToPageDialog } from './components/JumpToPageDialog';
+import { hasContents, NavigationSheet, type NavigationTab } from './components/NavigationSheet';
 import { PasswordPrompt } from './components/PasswordPrompt';
+import { ReaderMenu } from './components/ReaderMenu';
 import { ReaderPage, type RenderPageOverlay } from './components/ReaderPage';
+import { SearchAnnouncer, SearchField, SearchToolsRow } from './components/SearchBar';
+import { SearchHighlights } from './components/SearchHighlights';
 import { THUMB_STRIP_HEIGHT, ThumbnailStrip } from './components/ThumbnailStrip';
 import {
   readerErrorActions,
@@ -62,15 +76,21 @@ import {
   type ReadingStateSaver,
   type RestoredReadingState,
 } from './readingState';
-import { createReaderStore, ReaderStoreProvider, useReaderStore, type ReaderStore } from './store';
+import {
+  createReaderStore,
+  ReaderStoreProvider,
+  useReaderStore,
+  useReaderStoreApi,
+  type ReaderStore,
+} from './store';
+import { isSpanVisible, matchBounds, revealWithinCell, type MatchRef } from './search';
+import { createSearchController, type SearchController } from './searchController';
+import { useOutline } from './useOutline';
 import { useReaderDocument } from './useReaderDocument';
 import { useReaderZoom } from './useReaderZoom';
 import { zoomFrame } from './zoom';
 
-/** Top bar height below the status bar, dp. */
-export const TOP_BAR_HEIGHT = 56;
-/** Page indicator row above the thumbnail strip, dp. */
-const INDICATOR_HEIGHT = 48;
+export { TOP_BAR_HEIGHT } from './chrome';
 /**
  * The list is shown at once if anchoring to the restored page has not
  * finished by then (never leaves the reader blank), ms.
@@ -189,11 +209,11 @@ function StatusFrame({ title, children }: { title: string; children: ReactNode }
 
 type TopBarProps = {
   title: string;
-  mode?: ReadingMode;
-  onToggleMode?: () => void;
+  /** Icon buttons after the title. */
+  actions?: ReactNode;
 };
 
-function TopBar({ title, mode, onToggleMode }: TopBarProps) {
+function TopBar({ title, actions }: TopBarProps) {
   const { t } = useTranslation();
   const { palette } = useTheme();
   return (
@@ -211,22 +231,7 @@ function TopBar({ title, mode, onToggleMode }: TopBarProps) {
       >
         {title}
       </Text>
-      {mode && onToggleMode ? (
-        <IconButton
-          testID="reader-mode"
-          icon={
-            mode === 'vertical' ? (
-              <HorizontalPagesIcon color={palette.foreground} />
-            ) : (
-              <VerticalPagesIcon color={palette.foreground} />
-            )
-          }
-          accessibilityLabel={t(
-            mode === 'vertical' ? 'reader.switchToHorizontal' : 'reader.switchToVertical',
-          )}
-          onPress={onToggleMode}
-        />
-      ) : null}
+      {actions}
     </View>
   );
 }
@@ -564,19 +569,30 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
   );
   const crossRef = useRef<ScrollView>(null);
 
+  /** Height of the chrome over the top of the pages in vertical mode, dp. */
+  const chromeTopHeight = useCallback((): number => {
+    const { chromeVisible, searchOpen } = store.getState();
+    if (horizontal || !chromeVisible) return 0;
+    return insets.top + TOP_BAR_HEIGHT + (searchOpen ? SEARCH_TOOLS_HEIGHT : 0);
+  }, [horizontal, store, insets.top]);
+
   /**
    * Scrolls `page` into place without animation. In vertical mode with the
    * chrome shown, the page top lands just below the top bar (not under it).
+   * `withinPage` scrolls that much further into the page's cell (a search
+   * match lower down on a zoomed page).
    */
   const scrollToPage = useCallback(
-    (page: number): Promise<void> => {
+    (page: number, withinPage = 0): Promise<void> => {
       const list = listRef.current;
       if (!list) return Promise.resolve();
-      const chromeTop =
-        !horizontal && store.getState().chromeVisible ? insets.top + TOP_BAR_HEIGHT : 0;
-      return list.scrollToIndex({ index: page, animated: false, viewOffset: -chromeTop });
+      return list.scrollToIndex({
+        index: page,
+        animated: false,
+        viewOffset: withinPage - chromeTopHeight(),
+      });
     },
-    [horizontal, store, insets.top],
+    [chromeTopHeight],
   );
 
   const toggleChrome = useCallback(() => store.getState().toggleChrome(), [store]);
@@ -590,6 +606,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
     resetOffsets,
     scheduleDetails,
     zoomStep,
+    revealCross,
   } = useReaderZoom({
     initialZoom: restored.zoom,
     viewport,
@@ -681,12 +698,130 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
     [showPage, scrollToPage],
   );
 
+  const openJump = useCallback(() => setJumpOpen(true), []);
+
   const onJump = useCallback(
     (page: number) => {
       setJumpOpen(false);
       jumpTo(page);
     },
     [jumpTo],
+  );
+
+  /**
+   * Shows a search match at the current zoom. In vertical mode the list does
+   * not move when the match is already wholly in the part of the screen the
+   * chrome leaves free; otherwise its page comes into place (further into the
+   * cell when the match would be below the visible part). When zoomed, the
+   * sideways pan then brings the match into view, between the chrome.
+   */
+  const navigateToMatch = useCallback(
+    (match: MatchRef) => {
+      showPage(match.page);
+      const frame = frames[match.page];
+      const pageMatches = store.getState().searchResults.byPage[match.page];
+      const rects = pageMatches?.rects[match.index];
+      const bounds =
+        frame && pageMatches && rects
+          ? matchBounds(rects, pageMatches.rotation, {
+              width: frame.pageWidth,
+              height: frame.pageHeight,
+            })
+          : null;
+      if (!frame || !bounds) {
+        scrollToPage(match.page).catch(reportError);
+        return;
+      }
+      const { chromeVisible, searchOpen } = store.getState();
+      const topOverlay = chromeVisible
+        ? insets.top + TOP_BAR_HEIGHT + (searchOpen ? SEARCH_TOOLS_HEIGHT : 0)
+        : 0;
+      // The thumbnail strip is hidden while searching.
+      const bottomOverlay = chromeVisible
+        ? insets.bottom + INDICATOR_HEIGHT + (searchOpen ? 0 : THUMB_STRIP_HEIGHT)
+        : 0;
+      const revealSideways = () => {
+        if (zoom <= 1) return;
+        if (horizontal) {
+          revealCross(frame.top + bounds.y, bounds.height, {
+            start: topOverlay,
+            end: bottomOverlay,
+          });
+        } else {
+          revealCross(frame.left + bounds.x, bounds.width);
+        }
+      };
+
+      if (horizontal) {
+        // Paged mode at 1× snaps whole pages: the page is all there is to show.
+        const withinPage =
+          zoom <= 1 ? 0 : revealWithinCell(frame.left + bounds.x, bounds.width, viewport.width);
+        scrollToPage(match.page, withinPage).then(revealSideways, reportError);
+        return;
+      }
+
+      const list = listRef.current;
+      const layout = list?.getLayout(match.page);
+      if (list && layout) {
+        // Item layouts start after the list header; scroll offsets include it.
+        const offset = list.getAbsoluteLastScrollOffset();
+        const matchTop = list.getFirstItemOffset() + layout.y + frame.top + bounds.y;
+        if (
+          isSpanVisible(
+            matchTop,
+            bounds.height,
+            offset + topOverlay,
+            offset + viewport.height - bottomOverlay,
+          )
+        ) {
+          revealSideways();
+          return;
+        }
+      }
+      const available = viewport.height - topOverlay - bottomOverlay;
+      const withinPage = revealWithinCell(frame.top + bounds.y, bounds.height, available);
+      scrollToPage(match.page, withinPage).then(revealSideways, reportError);
+    },
+    [
+      frames,
+      store,
+      showPage,
+      scrollToPage,
+      horizontal,
+      insets.top,
+      insets.bottom,
+      viewport.width,
+      viewport.height,
+      zoom,
+      revealCross,
+    ],
+  );
+
+  const [search] = useState<SearchController>(() => createSearchController({ docId, store }));
+  // The controller outlives renders; it always navigates with the latest
+  // frames and zoom.
+  useEffect(() => search.setNavigator(navigateToMatch), [search, navigateToMatch]);
+  // Leaving the reader stops a running search (its document closes next).
+  useEffect(() => () => search.dispose(), [search]);
+
+  const [bookmarks] = useState<BookmarkActions>(() =>
+    createBookmarkActions({
+      fileId: file.id,
+      store,
+      repository: () => getRepositories().bookmarks,
+    }),
+  );
+  useEffect(() => bookmarks.load(), [bookmarks]);
+
+  // Search highlights under any overlay the screen was given.
+  const pageOverlay = useCallback<RenderPageOverlay>(
+    (page, layout) => (
+      <>
+        <SearchHighlights page={page} width={layout.width} height={layout.height} />
+        {renderOverlay?.(page, layout)}
+      </>
+    ),
+    [renderOverlay],
   );
 
   const toggleMode = useCallback(() => {
@@ -732,7 +867,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
           onTap={toggleChrome}
           acceptRenderError={acceptRenderError}
           onZoomStep={zoomStep}
-          renderOverlay={renderOverlay}
+          renderOverlay={pageOverlay}
         />
       );
     },
@@ -745,13 +880,24 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       toggleChrome,
       acceptRenderError,
       zoomStep,
-      renderOverlay,
+      pageOverlay,
     ],
   );
 
+  // While searching, the search tools row sits under the top bar: the
+  // first page starts below both, so nothing at its top is hidden.
+  const searchOpen = useReaderStore((state) => state.searchOpen);
   const header = useMemo(
-    () => (horizontal ? null : <View style={{ height: insets.top + TOP_BAR_HEIGHT }} />),
-    [horizontal, insets.top],
+    () =>
+      horizontal ? null : (
+        <View
+          testID="reader-list-header"
+          style={{
+            height: insets.top + TOP_BAR_HEIGHT + (searchOpen ? SEARCH_TOOLS_HEIGHT : 0),
+          }}
+        />
+      ),
+    [horizontal, insets.top, searchOpen],
   );
   const footer = useMemo(
     () =>
@@ -829,8 +975,11 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
         mode={mode}
         nightMode={paper.nightMode}
         sepia={paper.sepia}
+        ready={anchoredInstance !== null}
+        search={search}
+        bookmarks={bookmarks}
         onToggleMode={toggleMode}
-        onOpenJump={() => setJumpOpen(true)}
+        onOpenJump={openJump}
         onSelectPage={jumpTo}
       />
       {jumpOpen ? (
@@ -855,15 +1004,21 @@ type ReaderChromeProps = {
   mode: ReadingMode;
   nightMode: boolean;
   sepia: boolean;
+  /** The first page is on screen: the outline may load now. */
+  ready: boolean;
+  search: SearchController;
+  bookmarks: BookmarkActions;
   onToggleMode: () => void;
   onOpenJump: () => void;
   onSelectPage: (page: number) => void;
 };
 
 /**
- * Top bar, page indicator and thumbnail strip, drawn over the pages. A tap on
- * a page hides them (fullscreen) together with the status bar; another tap
- * brings them back. Only this subtree re-renders on the toggle.
+ * Top bar (or the search field and its tools while searching), page
+ * indicator and thumbnail strip, drawn over the pages, plus the sheets they
+ * open. A tap on a page hides the bars (fullscreen) together with the status
+ * bar; another tap brings them back. Only this subtree re-renders on the
+ * toggle.
  */
 const ReaderChrome = memo(function ReaderChrome({
   title,
@@ -873,6 +1028,9 @@ const ReaderChrome = memo(function ReaderChrome({
   mode,
   nightMode,
   sepia,
+  ready,
+  search,
+  bookmarks,
   onToggleMode,
   onOpenJump,
   onSelectPage,
@@ -880,10 +1038,39 @@ const ReaderChrome = memo(function ReaderChrome({
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const visible = useReaderStore((state) => state.chromeVisible);
+  const searchOpen = useReaderStore((state) => state.searchOpen);
+  const { outline, reload: reloadOutline } = useOutline(docId, ready);
+  const [sheet, setSheet] = useState<NavigationTab | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Android back closes the search before it leaves the reader.
+  useEffect(() => {
+    if (!searchOpen) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      search.close();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [searchOpen, search]);
+
+  const closeSheet = useCallback(() => setSheet(null), []);
+  const jumpFromSheet = useCallback(
+    (page: number) => {
+      setSheet(null);
+      onSelectPage(page);
+    },
+    [onSelectPage],
+  );
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const menuAction = useCallback((action: () => void) => {
+    setMenuOpen(false);
+    action();
+  }, []);
 
   return (
     <>
       <StatusBar hidden={!visible} style={statusBarStyle[theme]} animated />
+      {searchOpen ? <SearchAnnouncer /> : null}
       {visible ? (
         <>
           <View
@@ -891,7 +1078,25 @@ const ReaderChrome = memo(function ReaderChrome({
             className="absolute left-0 right-0 top-0 border-b border-border bg-background"
             style={{ paddingTop: insets.top }}
           >
-            <TopBar title={title} mode={mode} onToggleMode={onToggleMode} />
+            {searchOpen ? (
+              <>
+                <SearchField controller={search} />
+                <SearchToolsRow controller={search} />
+              </>
+            ) : (
+              <TopBar
+                title={title}
+                actions={
+                  <ReaderActions
+                    showContents={hasContents(outline)}
+                    onSearch={search.open}
+                    onToggleBookmark={bookmarks.toggle}
+                    onOpenContents={() => setSheet('contents')}
+                    onOpenMenu={() => setMenuOpen(true)}
+                  />
+                }
+              />
+            )}
           </View>
           <View
             testID="reader-bottom-bar"
@@ -906,21 +1111,109 @@ const ReaderChrome = memo(function ReaderChrome({
             >
               <PageIndicator pageCount={pageCount} onPress={onOpenJump} />
             </View>
-            <View className="border-t border-border bg-background">
-              <ThumbnailStrip
-                docId={docId}
-                pages={pages}
-                nightMode={nightMode}
-                sepia={sepia}
-                onSelect={onSelectPage}
-              />
-            </View>
+            {/* Hidden while searching: next / previous move through the
+                document instead, and the pages get the room (in paged mode
+                at 1× the page cannot scroll out from under the chrome). */}
+            {searchOpen ? null : (
+              <View className="border-t border-border bg-background">
+                <ThumbnailStrip
+                  docId={docId}
+                  pages={pages}
+                  nightMode={nightMode}
+                  sepia={sepia}
+                  onSelect={onSelectPage}
+                />
+              </View>
+            )}
           </View>
         </>
       ) : null}
+      <ReaderMenu
+        visible={menuOpen}
+        mode={mode}
+        onClose={closeMenu}
+        onOpenBookmarks={() => menuAction(() => setSheet('bookmarks'))}
+        onOpenJump={() => menuAction(onOpenJump)}
+        onToggleMode={() => menuAction(onToggleMode)}
+      />
+      <NavigationSheet
+        tab={sheet}
+        outline={outline}
+        onRetryOutline={reloadOutline}
+        onTabChange={setSheet}
+        onClose={closeSheet}
+        onJump={jumpFromSheet}
+        onRemoveBookmark={bookmarks.remove}
+        onRestoreBookmark={bookmarks.restore}
+      />
     </>
   );
 });
+
+/**
+ * The top bar's actions, sized for a 360 dp phone: search, the bookmark of
+ * the page being read, contents (only for documents with an outline) and
+ * "More options" for the rest.
+ */
+function ReaderActions({
+  showContents,
+  onSearch,
+  onToggleBookmark,
+  onOpenContents,
+  onOpenMenu,
+}: {
+  showContents: boolean;
+  onSearch: () => void;
+  onToggleBookmark: (page: number) => void;
+  onOpenContents: () => void;
+  onOpenMenu: () => void;
+}) {
+  const { t } = useTranslation();
+  const { palette } = useTheme();
+  const store = useReaderStoreApi();
+  const bookmarked = useReaderStore((state) =>
+    state.bookmarks.some((bookmark) => bookmark.page === state.page),
+  );
+
+  return (
+    <>
+      <IconButton
+        testID="reader-search"
+        icon={<SearchIcon color={palette.foreground} />}
+        accessibilityLabel={t('reader.search.open')}
+        onPress={onSearch}
+      />
+      <Pressable
+        testID="reader-bookmark"
+        accessibilityRole="togglebutton"
+        accessibilityLabel={t('reader.bookmarks.add')}
+        accessibilityState={{ checked: bookmarked }}
+        onPress={() => onToggleBookmark(store.getState().page)}
+        className="h-12 w-12 items-center justify-center rounded-full active:bg-surface"
+      >
+        {bookmarked ? (
+          <BookmarkFilledIcon color={palette.primary} />
+        ) : (
+          <BookmarkIcon color={palette.foreground} />
+        )}
+      </Pressable>
+      {showContents ? (
+        <IconButton
+          testID="reader-contents"
+          icon={<TocIcon color={palette.foreground} />}
+          accessibilityLabel={t('reader.contents.open')}
+          onPress={onOpenContents}
+        />
+      ) : null}
+      <IconButton
+        testID="reader-more"
+        icon={<MoreVertIcon color={palette.foreground} />}
+        accessibilityLabel={t('reader.menu.more')}
+        onPress={onOpenMenu}
+      />
+    </>
+  );
+}
 
 /** "12 / 300"; opens jump-to-page. Re-renders on page changes, alone. */
 function PageIndicator({ pageCount, onPress }: { pageCount: number; onPress: () => void }) {

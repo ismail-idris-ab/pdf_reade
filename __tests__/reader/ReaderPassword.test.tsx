@@ -1,12 +1,19 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import Storage from 'expo-sqlite/kv-store';
 import { router } from 'expo-router';
-import { AccessibilityInfo, AppState, Keyboard, type AppStateStatus } from 'react-native';
+import {
+  AccessibilityInfo,
+  AppState,
+  Keyboard,
+  TextInput,
+  type AppStateStatus,
+} from 'react-native';
 
 import PdfEngineModule from '../../modules/pdf-engine/src/PdfEngineModule';
 import { codedError, type FakePdfEngineModule } from '../engine/fakePdfEngine';
 import { getRepositories } from '@/db/client';
 import type { NewFile } from '@/db/types';
+import { REFOCUS_DELAY_MS } from '@/features/reader/components/PasswordPrompt';
 import { ReaderScreen } from '@/features/reader/ReaderScreen';
 import { CLOSE_DELAY_MS } from '@/features/reader/useReaderDocument';
 import { reportError } from '@/lib/crash';
@@ -182,6 +189,7 @@ describe('ReaderScreen — password-protected PDF (T2.5)', () => {
     expect(screen.queryByTestId('reader-password')).toBeNull();
     expect(screen.getByTestId('reader-page-0')).toBeOnTheScreen();
     expect(screen.getByText('2 / 3')).toBeOnTheScreen();
+    await act(async () => fireEvent.press(screen.getByTestId('reader-more')));
     expect(screen.getByTestId('reader-mode').props.accessibilityLabel).toBe(
       'Switch to continuous scrolling',
     );
@@ -231,6 +239,28 @@ describe('ReaderScreen — password-protected PDF (T2.5)', () => {
     await settle();
     expect(screen.getByTestId('reader')).toBeOnTheScreen();
     expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it('brings the keyboard back after a wrong password sent from the Go key', async () => {
+    const focus = track(jest.spyOn(TextInput.prototype, 'focus'));
+    const blur = track(jest.spyOn(TextInput.prototype, 'blur'));
+    // Android closed the keyboard but the field still holds focus.
+    track(jest.spyOn(TextInput.prototype, 'isFocused').mockReturnValue(true));
+    engine.setHoldOpens(true);
+    const file = addFile();
+    await renderReader(file.id);
+    await act(async () => engine.rejectOpen(engine.pendingOpenIds()[0] ?? '', 'PASSWORD_REQUIRED'));
+    await typePassword('wrong');
+    await act(async () => fireEvent(input(), 'submitEditing'));
+    focus.mockClear();
+    blur.mockClear();
+
+    await act(async () => engine.rejectOpen(engine.pendingOpenIds()[0] ?? '', 'WRONG_PASSWORD'));
+    expect(focus).not.toHaveBeenCalled();
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, REFOCUS_DELAY_MS + 20)));
+    expect(blur).toHaveBeenCalledTimes(1);
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(blur.mock.invocationCallOrder[0]).toBeLessThan(focus.mock.invocationCallOrder[0] ?? 0);
   });
 
   it('Cancel leaves the reader', async () => {
@@ -330,6 +360,7 @@ describe('ReaderScreen — password-protected PDF (T2.5)', () => {
     await pressOpen();
     expect(screen.getByTestId('reader')).toBeOnTheScreen();
     // Reading (mode switch) writes reading_state; the reader then closes.
+    await act(async () => fireEvent.press(screen.getByTestId('reader-more')));
     await act(async () => fireEvent.press(screen.getByTestId('reader-mode')));
     await unmount();
     await act(() => new Promise<void>((resolve) => setTimeout(resolve, CLOSE_DELAY_MS + 20)));
@@ -400,10 +431,15 @@ describe('ReaderScreen — password-protected PDF (T2.5)', () => {
     await renderReader(file.id);
     expect(input().props.accessibilityHint).toBeUndefined();
 
+    const focus = track(jest.spyOn(TextInput.prototype, 'focus'));
     await typePassword('wrong');
+    focus.mockClear();
     await pressOpen();
     expect(input().props.accessibilityHint).toBe(
       'That password did not work. Check it and try again.',
     );
+    // Focus stays where TalkBack put it.
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, REFOCUS_DELAY_MS + 20)));
+    expect(focus).not.toHaveBeenCalled();
   });
 });

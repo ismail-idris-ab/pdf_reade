@@ -63,6 +63,46 @@ export const palettes: Record<ThemeName, Palette> = {
   },
 };
 
+/**
+ * Search highlights drawn over the rendered page (T2.6). The page itself is
+ * the paper of each theme (white; inverted to black in dark, the reader's
+ * night mode; sepia paper), so these are chosen against that paper, not the
+ * UI background. Fills are translucent so the text underneath stays
+ * readable; the current match also gets an outline, so it differs by more
+ * than colour.
+ */
+export type SearchHighlightColors = {
+  match: string;
+  matchOpacity: number;
+  current: string;
+  currentOpacity: number;
+  currentStroke: string;
+};
+
+export const searchHighlights: Record<ThemeName, SearchHighlightColors> = {
+  light: {
+    match: '#FACC15',
+    matchOpacity: 0.4,
+    current: '#F97316',
+    currentOpacity: 0.5,
+    currentStroke: '#C2410C',
+  },
+  dark: {
+    match: '#FACC15',
+    matchOpacity: 0.35,
+    current: '#FB923C',
+    currentOpacity: 0.5,
+    currentStroke: '#FDBA74',
+  },
+  sepia: {
+    match: '#EAB308',
+    matchOpacity: 0.4,
+    current: '#EA580C',
+    currentOpacity: 0.45,
+    currentStroke: '#9A3412',
+  },
+};
+
 /** Status bar content style that stays readable on each theme's background. */
 export const statusBarStyle: Record<ThemeName, 'light' | 'dark'> = {
   light: 'dark',

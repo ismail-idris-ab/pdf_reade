@@ -12,6 +12,11 @@ export type BottomSheetProps = {
   title?: string;
   /** False for sheets that must not be closed by the user (e.g. progress). */
   dismissible?: boolean;
+  /**
+   * False when the content scrolls itself (a virtualized list, which must
+   * not sit inside a ScrollView): the content then sizes itself.
+   */
+  scroll?: boolean;
   children: ReactNode;
   testID?: string;
 };
@@ -21,6 +26,7 @@ export function BottomSheet({
   onClose,
   title,
   dismissible = true,
+  scroll = true,
   children,
   testID,
 }: BottomSheetProps) {
@@ -49,10 +55,14 @@ export function BottomSheet({
             {title}
           </Text>
         ) : null}
-        {/* Long content (many actions, large font scale) scrolls inside the sheet. */}
-        <ScrollView bounces={false} style={{ flexGrow: 0 }}>
-          {children}
-        </ScrollView>
+        {scroll ? (
+          // Long content (many actions, large font scale) scrolls inside the sheet.
+          <ScrollView bounces={false} style={{ flexGrow: 0 }}>
+            {children}
+          </ScrollView>
+        ) : (
+          children
+        )}
       </Animated.View>
     </FullScreenModal>
   );

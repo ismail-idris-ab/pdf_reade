@@ -1,9 +1,34 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { createStore, useStore, type StoreApi } from 'zustand';
 
+import type { BookmarkRow } from '@/db/types';
 import type { DetailRegion } from '@/lib/engine';
 
-export type ReaderUiState = {
+import {
+  EMPTY_RESULTS,
+  type MatchRef,
+  type SearchOptionsState,
+  type SearchResults,
+  type SearchStatus,
+} from './search';
+
+/** In-document search (T2.6); the page cells read the results per page. */
+export type ReaderSearchState = {
+  searchOpen: boolean;
+  /**
+   * The search was just opened: the field takes focus (and the keyboard
+   * opens) once, not again each time the chrome comes back from fullscreen.
+   */
+  searchFocusPending: boolean;
+  searchQuery: string;
+  searchOptions: SearchOptionsState;
+  searchStatus: SearchStatus;
+  searchResults: SearchResults;
+  /** The selected match (stronger highlight); null before the first next/previous. */
+  currentMatch: MatchRef | null;
+};
+
+export type ReaderUiState = ReaderSearchState & {
   /** 0-based page shown in the indicator (the most visible page). */
   page: number;
   /** Top bar, page indicator and thumbnail strip; false is fullscreen. */
@@ -14,12 +39,27 @@ export type ReaderUiState = {
    * page cells whose region changed.
    */
   details: Readonly<Record<number, DetailRegion>>;
+  /** This file's bookmarks, ascending by page. */
+  bookmarks: readonly BookmarkRow[];
   setPage: (page: number) => void;
+  setSearch: (patch: Partial<ReaderSearchState>) => void;
+  setBookmarks: (bookmarks: readonly BookmarkRow[]) => void;
   setDetails: (details: Readonly<Record<number, DetailRegion>>) => void;
   toggleChrome: () => void;
 };
 
 const NO_DETAILS: Readonly<Record<number, DetailRegion>> = {};
+
+/** A closed search: no query, no results. */
+export const CLOSED_SEARCH: ReaderSearchState = {
+  searchOpen: false,
+  searchFocusPending: false,
+  searchQuery: '',
+  searchOptions: { matchCase: false, wholeWord: false },
+  searchStatus: { kind: 'idle' },
+  searchResults: EMPTY_RESULTS,
+  currentMatch: null,
+};
 
 export type ReaderStore = StoreApi<ReaderUiState>;
 
@@ -34,7 +74,11 @@ export function createReaderStore(initialPage: number): ReaderStore {
     page: initialPage,
     chromeVisible: true,
     details: NO_DETAILS,
+    ...CLOSED_SEARCH,
+    bookmarks: [],
     setPage: (page) => set((state) => (state.page === page ? state : { page })),
+    setSearch: (patch) => set(patch),
+    setBookmarks: (bookmarks) => set({ bookmarks }),
     setDetails: (details) =>
       set((state) =>
         Object.keys(details).length === 0 && Object.keys(state.details).length === 0

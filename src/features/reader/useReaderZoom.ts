@@ -19,6 +19,7 @@ import type { DetailRegion, PageInfo } from '@/lib/engine';
 import { markMovement } from './detailMetrics';
 import { visibleSpans, type PageFrame, type Viewport } from './layout';
 import type { ReadingStateSaver } from './readingState';
+import { revealCrossOffset, type ViewportInsets } from './search';
 import type { ReaderStore } from './store';
 import {
   clampPinchScale,
@@ -254,6 +255,32 @@ export function useReaderZoom({
       );
     },
     [crossRef, horizontal],
+  );
+
+  /**
+   * Moves the sideways pan of a zoomed page so a span of the cross axis
+   * (`start`, `length` in content coordinates, e.g. a search match) is in
+   * view: unchanged when it already is, else centred on it. A no-op at 1×,
+   * where the cross axis does not scroll. insets: the parts of the cross
+   * axis the chrome covers.
+   */
+  const revealCross = useCallback(
+    (start: number, length: number, insets?: ViewportInsets) => {
+      const zoomNow = zoomRef.current;
+      if (zoomNow <= 1) return;
+      const crossLength = horizontal ? height : width;
+      const target = revealCrossOffset(
+        start,
+        length,
+        crossLength,
+        crossLength * zoomNow,
+        crossOffsetRef.current,
+        insets,
+      );
+      if (Math.abs(target - crossOffsetRef.current) >= 1) scrollCross(target);
+      scheduleDetails();
+    },
+    [horizontal, width, height, scrollCross, scheduleDetails],
   );
 
   /**
@@ -514,5 +541,6 @@ export function useReaderZoom({
     resetOffsets,
     scheduleDetails,
     zoomStep,
+    revealCross,
   };
 }

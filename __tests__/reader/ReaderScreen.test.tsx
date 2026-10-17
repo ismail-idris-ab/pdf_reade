@@ -89,6 +89,16 @@ async function renderReader(fileId: number | null, renderOverlay?: RenderPageOve
 // adds no offset, so at 250 only the last page (200..300) is in view.
 const SCROLL_TO_LAST_PAGE = 250;
 
+/** The reading-mode switch lives in the "More options" menu (T2.6). */
+async function openMenu() {
+  await act(async () => fireEvent.press(screen.getByTestId('reader-more')));
+}
+
+async function pressModeToggle() {
+  await openMenu();
+  await act(async () => fireEvent.press(screen.getByTestId('reader-mode')));
+}
+
 const indicatorText = () =>
   screen.getByTestId('reader-page-indicator').props.accessibilityLabel as string;
 
@@ -150,10 +160,14 @@ describe('ReaderScreen — reading', () => {
       zoom: 2.5,
     });
     await renderReader(file.id);
-    const toggle = screen.getByTestId('reader-mode');
-    expect(toggle.props.accessibilityLabel).toBe('Switch to continuous scrolling');
+    await openMenu();
+    expect(screen.getByTestId('reader-mode').props.accessibilityLabel).toBe(
+      'Switch to continuous scrolling',
+    );
 
-    await act(async () => fireEvent.press(toggle));
+    await act(async () => fireEvent.press(screen.getByTestId('reader-mode')));
+    expect(screen.queryByTestId('reader-menu')).toBeNull();
+    await openMenu();
     expect(screen.getByTestId('reader-mode').props.accessibilityLabel).toBe(
       'Switch to page-by-page reading',
     );
@@ -409,8 +423,8 @@ describe('ReaderScreen — reading', () => {
     const file = addFile();
     getRepositories().readingState.save({ fileId: file.id, page: 2, mode: 'vertical', zoom: 1 });
     await renderReader(file.id);
-    await act(async () => fireEvent.press(screen.getByTestId('reader-mode')));
-    await act(async () => fireEvent.press(screen.getByTestId('reader-mode')));
+    await pressModeToggle();
+    await pressModeToggle();
     await waitFor(() => expect(frameOpacity()).toBe(1), { timeout: 3000 });
     await act(() => new Promise<void>((resolve) => setTimeout(resolve, 1200)));
     expect(frameOpacity()).toBe(1);
