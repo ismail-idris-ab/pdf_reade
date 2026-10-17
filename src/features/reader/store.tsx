@@ -11,6 +11,7 @@ import {
   type SearchResults,
   type SearchStatus,
 } from './search';
+import type { TextSelection } from './selection';
 
 /** In-document search (T2.6); the page cells read the results per page. */
 export type ReaderSearchState = {
@@ -41,11 +42,14 @@ export type ReaderUiState = ReaderSearchState & {
   details: Readonly<Record<number, DetailRegion>>;
   /** This file's bookmarks, ascending by page. */
   bookmarks: readonly BookmarkRow[];
+  /** The text selection (T2.8), on one page; null when nothing is selected. */
+  selection: TextSelection | null;
   setPage: (page: number) => void;
   setSearch: (patch: Partial<ReaderSearchState>) => void;
   setBookmarks: (bookmarks: readonly BookmarkRow[]) => void;
   setDetails: (details: Readonly<Record<number, DetailRegion>>) => void;
   toggleChrome: () => void;
+  setSelection: (selection: TextSelection | null) => void;
 };
 
 const NO_DETAILS: Readonly<Record<number, DetailRegion>> = {};
@@ -76,6 +80,7 @@ export function createReaderStore(initialPage: number): ReaderStore {
     details: NO_DETAILS,
     ...CLOSED_SEARCH,
     bookmarks: [],
+    selection: null,
     setPage: (page) => set((state) => (state.page === page ? state : { page })),
     setSearch: (patch) => set(patch),
     setBookmarks: (bookmarks) => set({ bookmarks }),
@@ -86,6 +91,8 @@ export function createReaderStore(initialPage: number): ReaderStore {
           : { details: Object.keys(details).length === 0 ? NO_DETAILS : details },
       ),
     toggleChrome: () => set((state) => ({ chromeVisible: !state.chromeVisible })),
+    setSelection: (selection) =>
+      set((state) => (state.selection === selection ? state : { selection })),
   }));
 }
 

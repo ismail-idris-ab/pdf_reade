@@ -314,6 +314,17 @@ export const fr: Catalog = {
       more: 'Plus d’options',
       title: 'Options de lecture',
     },
+    selection: {
+      selectAll: 'Sélectionner tout le texte de cette page',
+      actions: 'Actions sur le texte sélectionné',
+      copy: 'Copier',
+      share: 'Partager',
+      copied: 'Copié',
+      selected_one: 'Sélection : {{value}} caractère',
+      selected_many: 'Sélection : {{value}} de caractères',
+      selected_other: 'Sélection : {{value}} caractères',
+      imageOnly: 'Cette page est une image ; son texte ne peut pas être sélectionné',
+    },
   },
   settings: {
     title: 'Paramètres',

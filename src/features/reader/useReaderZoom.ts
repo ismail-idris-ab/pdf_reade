@@ -20,6 +20,7 @@ import { markMovement } from './detailMetrics';
 import { visibleSpans, type PageFrame, type Viewport } from './layout';
 import type { ReadingStateSaver } from './readingState';
 import { revealCrossOffset, type ViewportInsets } from './search';
+import { pageHitAt, type PageHit, type ScrollOffsets, type SelectionRequest } from './selection';
 import type { ReaderStore } from './store';
 import {
   clampPinchScale,
@@ -30,6 +31,8 @@ import {
   DOUBLE_TAP_ANIMATION_MS,
   DOUBLE_TAP_MAX_DELAY_MS,
   doubleTapTarget,
+  LONG_PRESS_MAX_DISTANCE,
+  LONG_PRESS_MS,
   pinchTranslate,
   sameZoom,
   stepZoom,
@@ -84,6 +87,13 @@ export type ReaderZoomOptions = {
   scrollToPage: (page: number) => Promise<void>;
   /** A single tap that was not part of a double tap. */
   onSingleTap: () => void;
+  /**
+   * A long press (text selection, T2.8): where it landed on which page, or
+   * null between pages or in a page's margin.
+   */
+  onLongPress: (request: SelectionRequest | null) => void;
+  /** A pinch, double tap or zoom step is starting. */
+  onZoomStart: () => void;
 };
 
 /**
@@ -110,6 +120,8 @@ export function useReaderZoom({
   saverRef,
   scrollToPage,
   onSingleTap,
+  onLongPress,
+  onZoomStart,
 }: ReaderZoomOptions) {
   const [zoom, setZoom] = useState(() => clampZoom(initialZoom));
   const zoomRef = useRef(zoom);
@@ -442,11 +454,86 @@ export function useReaderZoom({
     scheduleDetails,
   ]);
 
-  const onPinchStart = useCallback(() => clearDetails(), [clearDetails]);
+  const onPinchStart = useCallback(() => {
+    onZoomStart();
+    clearDetails();
+  }, [clearDetails, onZoomStart]);
+
+  /** Where the scrolls are now (the selection is cleared once they move). */
+  const scrollOffsets = useCallback(
+    (): ScrollOffsets => ({ main: mainOffsetRef.current, cross: crossOffsetRef.current }),
+    [],
+  );
+
+  /**
+   * The page under (x, y) of the page area and the point on it (dp on the
+   * displayed page at the current zoom); null between pages or in a margin.
+   */
+  const pageHit = useCallback(
+    (x: number, y: number): PageHit | null => {
+      const list = listRef.current;
+      if (!list) return null;
+      return pageHitAt(
+        visibleSpans(list, horizontal),
+        (page) => {
+          const base = baseFrames[page];
+          return base ? zoomFrame(base, zoomRef.current) : undefined;
+        },
+        mainOffsetRef.current - list.getFirstItemOffset() + (horizontal ? x : y),
+        crossOffsetRef.current + (horizontal ? y : x),
+        horizontal,
+      );
+    },
+    [listRef, horizontal, baseFrames],
+  );
+
+  const handleLongPress = useCallback(
+    (x: number, y: number) => {
+      const hit = pageHit(x, y);
+      onLongPress(
+        hit
+          ? {
+              ...hit,
+              origin: { x: x - hit.point.x, y: y - hit.point.y },
+              offsets: scrollOffsets(),
+            }
+          : null,
+      );
+    },
+    [pageHit, scrollOffsets, onLongPress],
+  );
+
+  /**
+   * Where `page` is in the page area now (for selecting all its text from a
+   * screen-reader action); null when it is not laid out near the view.
+   */
+  const pageRequest = useCallback(
+    (page: number): Omit<SelectionRequest, 'point'> | null => {
+      const list = listRef.current;
+      const base = baseFrames[page];
+      if (!list || !base) return null;
+      const span = visibleSpans(list, horizontal).find((item) => item.index === page);
+      if (!span) return null;
+      const frame = zoomFrame(base, zoomRef.current);
+      const mainStart =
+        span.start +
+        (horizontal ? frame.left : frame.top) -
+        (mainOffsetRef.current - list.getFirstItemOffset());
+      const crossStart = (horizontal ? frame.top : frame.left) - crossOffsetRef.current;
+      return {
+        page,
+        view: { width: frame.pageWidth, height: frame.pageHeight },
+        origin: horizontal ? { x: mainStart, y: crossStart } : { x: crossStart, y: mainStart },
+        offsets: scrollOffsets(),
+      };
+    },
+    [listRef, horizontal, baseFrames, scrollOffsets],
+  );
 
   const onDoubleTap = useCallback(
     (x: number, y: number) => {
       const target = doubleTapTarget(zoomRef.current);
+      onZoomStart();
       clearDetails();
       originX.set(x);
       originY.set(y);
@@ -460,17 +547,18 @@ export function useReaderZoom({
         }),
       );
     },
-    [clearDetails, originX, originY, panX, panY, liveScale, commitZoom],
+    [clearDetails, originX, originY, panX, panY, liveScale, commitZoom, onZoomStart],
   );
 
   /** Screen-reader zoom step, about the middle of the page area. */
   const zoomStep = useCallback(
     (direction: 'in' | 'out') => {
+      onZoomStart();
       clearDetails();
       const centre = { fromX: width / 2, fromY: height / 2, toX: width / 2, toY: height / 2 };
       commitZoom(stepZoom(zoomRef.current, direction), centre);
     },
-    [clearDetails, commitZoom, width, height],
+    [clearDetails, commitZoom, width, height, onZoomStart],
   );
 
   // The callbacks below run on gesture events (on the UI thread, handing over
@@ -515,9 +603,22 @@ export function useReaderZoom({
       .onEnd((_event, success) => {
         if (success) scheduleOnRN(onSingleTap);
       });
+    // One finger held still: text selection. It fails as soon as the finger
+    // lifts, moves (a scroll) or a second finger lands (a pinch), so taps
+    // are not delayed and pinching still works.
+    const longPress = Gesture.LongPress()
+      .withTestId('reader-long-press')
+      .minDuration(LONG_PRESS_MS)
+      // At most the touch slop: a slow drag fails the long press before the
+      // list starts scrolling.
+      .maxDistance(LONG_PRESS_MAX_DISTANCE)
+      .onStart((event) => {
+        scheduleOnRN(handleLongPress, event.x, event.y);
+      });
     // A single tap waits for the double tap to fail (at most
-    // DOUBLE_TAP_MAX_DELAY_MS); pinching works alongside either.
-    return Gesture.Simultaneous(pinch, Gesture.Exclusive(doubleTap, singleTap));
+    // DOUBLE_TAP_MAX_DELAY_MS); both wait for the long press to fail (on
+    // release); pinching works alongside any of them.
+    return Gesture.Simultaneous(pinch, Gesture.Exclusive(longPress, doubleTap, singleTap));
   }, [
     committed,
     liveScale,
@@ -529,6 +630,7 @@ export function useReaderZoom({
     onPinchStart,
     onDoubleTap,
     onSingleTap,
+    handleLongPress,
   ]);
   /* eslint-enable react-hooks/refs */
 
@@ -542,5 +644,7 @@ export function useReaderZoom({
     scheduleDetails,
     zoomStep,
     revealCross,
+    pageRequest,
+    scrollOffsets,
   };
 }

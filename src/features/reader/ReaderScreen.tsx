@@ -62,6 +62,8 @@ import { ReaderMenu } from './components/ReaderMenu';
 import { ReaderPage, type RenderPageOverlay } from './components/ReaderPage';
 import { SearchAnnouncer, SearchField, SearchToolsRow } from './components/SearchBar';
 import { SearchHighlights } from './components/SearchHighlights';
+import { SelectionHighlight } from './components/SelectionHighlight';
+import { SelectionLayer } from './components/SelectionLayer';
 import { THUMB_STRIP_HEIGHT, ThumbnailStrip } from './components/ThumbnailStrip';
 import {
   readerErrorActions,
@@ -85,6 +87,8 @@ import {
 } from './store';
 import { isSpanVisible, matchBounds, revealWithinCell, type MatchRef } from './search';
 import { createSearchController, type SearchController } from './searchController';
+import type { SelectionRequest } from './selection';
+import { createSelectionController, type SelectionController } from './selectionController';
 import { useOutline } from './useOutline';
 import { useReaderDocument } from './useReaderDocument';
 import { useReaderZoom } from './useReaderZoom';
@@ -597,6 +601,25 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
 
   const toggleChrome = useCallback(() => store.getState().toggleChrome(), [store]);
 
+  const [textSelection] = useState<SelectionController>(() =>
+    createSelectionController({ docId, store }),
+  );
+  // Closing the reader drops the selection and its cached page text.
+  useEffect(() => () => textSelection.dispose(), [textSelection]);
+  // A tap with text selected (or a long press still loading) only clears it.
+  const onSingleTap = useCallback(() => {
+    if (textSelection.isActive()) textSelection.clear();
+    else toggleChrome();
+  }, [textSelection, toggleChrome]);
+  const onLongPress = useCallback(
+    (request: SelectionRequest | null) => {
+      if (request) textSelection.selectAt(request);
+      else textSelection.clear();
+    },
+    [textSelection],
+  );
+  const clearSelection = useCallback(() => textSelection.clear(), [textSelection]);
+
   const {
     zoom,
     gesture,
@@ -607,6 +630,8 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
     scheduleDetails,
     zoomStep,
     revealCross,
+    pageRequest,
+    scrollOffsets,
   } = useReaderZoom({
     initialZoom: restored.zoom,
     viewport,
@@ -617,8 +642,21 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
     store,
     saverRef,
     scrollToPage,
-    onSingleTap: toggleChrome,
+    onSingleTap,
+    onLongPress,
+    onZoomStart: clearSelection,
   });
+  // A rebuilt list (new mode or size) moves every page: the selection goes.
+  useEffect(() => clearSelection(), [anchor.instance, clearSelection]);
+  // Screen-reader "Select all text on this page": the Copy / Share bar
+  // follows, and its buttons are reachable by swiping.
+  const selectAllOnPage = useCallback(
+    (page: number) => {
+      const request = pageRequest(page);
+      if (request) textSelection.selectAll(request);
+    },
+    [pageRequest, textSelection],
+  );
   const frames = useMemo(
     () => baseFrames.map((frame) => zoomFrame(frame, zoom)),
     [baseFrames, zoom],
@@ -669,6 +707,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       const { contentOffset, layoutMeasurement } = event.nativeEvent;
       const offset = horizontal ? contentOffset.x : contentOffset.y;
       onMainScroll(offset);
+      textSelection.noteScroll(scrollOffsets());
       // Only the list's own axis decides the page; the sideways pan of a
       // zoomed page (the outer scroll view) never reaches here.
       const page = pageAtScroll(
@@ -679,15 +718,16 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       );
       if (page !== null) showPage(page);
     },
-    [anchor.instance, horizontal, showPage, onMainScroll],
+    [anchor.instance, horizontal, showPage, onMainScroll, textSelection, scrollOffsets],
   );
 
   const onOuterScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset } = event.nativeEvent;
       onCrossScroll(horizontal ? contentOffset.y : contentOffset.x);
+      textSelection.noteScroll(scrollOffsets());
     },
-    [horizontal, onCrossScroll],
+    [horizontal, onCrossScroll, textSelection, scrollOffsets],
   );
 
   const jumpTo = useCallback(
@@ -813,11 +853,13 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
   );
   useEffect(() => bookmarks.load(), [bookmarks]);
 
-  // Search highlights under any overlay the screen was given.
+  // Search highlights and the text selection under any overlay the screen
+  // was given.
   const pageOverlay = useCallback<RenderPageOverlay>(
     (page, layout) => (
       <>
         <SearchHighlights page={page} width={layout.width} height={layout.height} />
+        <SelectionHighlight page={page} width={layout.width} height={layout.height} />
         {renderOverlay?.(page, layout)}
       </>
     ),
@@ -867,6 +909,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
           onTap={toggleChrome}
           acceptRenderError={acceptRenderError}
           onZoomStep={zoomStep}
+          onSelectAll={selectAllOnPage}
           renderOverlay={pageOverlay}
         />
       );
@@ -880,6 +923,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
       toggleChrome,
       acceptRenderError,
       zoomStep,
+      selectAllOnPage,
       pageOverlay,
     ],
   );
@@ -898,6 +942,10 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
         />
       ),
     [horizontal, insets.top, searchOpen],
+  );
+  const selectionInsets = useMemo(
+    () => ({ top: insets.top, bottom: insets.bottom }),
+    [insets.top, insets.bottom],
   );
   const footer = useMemo(
     () =>
@@ -966,6 +1014,7 @@ function ReaderBody({ file, document, restored, store, renderOverlay }: ReaderBo
             </Animated.View>
           </View>
         </GestureDetector>
+        <SelectionLayer controller={textSelection} area={viewport} insets={selectionInsets} />
       </View>
       <ReaderChrome
         title={file.name}

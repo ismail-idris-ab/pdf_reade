@@ -67,6 +67,7 @@ Only permissive licences are allowed, with their notice/credit requirements hono
 | react-native-gesture-handler | 2.32.0 | MIT | node_modules/react-native-gesture-handler/package.json | T2.4 |
 | hoist-non-react-statics (transitive, react-native-gesture-handler) | 3.3.2 | BSD-3-Clause | node_modules/hoist-non-react-statics/package.json — the BSD-3-Clause notice must be shown on the open-source notices screen (T7.5) | T2.4 |
 | @egjs/hammerjs, react-is (nested copy pulled by hoist-non-react-statics) (transitive, react-native-gesture-handler) | 2.0.17, 16.13.1 | MIT | node_modules/@egjs/hammerjs/package.json, node_modules/hoist-non-react-statics/node_modules/react-is/package.json | T2.4 |
+| expo-clipboard | 57.0.2 | MIT | node_modules/expo-clipboard/package.json | T2.8 |
 
 ## Transitive dependency notes
 

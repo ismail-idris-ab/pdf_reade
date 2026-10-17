@@ -55,3 +55,10 @@ jest.mock('expo-sqlite/kv-store', () => {
   };
   return { __esModule: true, default: storage, Storage: storage };
 });
+
+// expo-clipboard's native module has no Jest implementation; tests assert on these.
+jest.mock('expo-clipboard', () => ({
+  setStringAsync: jest.fn(() => Promise.resolve(true)),
+  getStringAsync: jest.fn(() => Promise.resolve('')),
+  hasStringAsync: jest.fn(() => Promise.resolve(false)),
+}));

@@ -261,3 +261,12 @@ Hausa (`ha`) and French (`fr`) strings are written best-effort during developmen
 | `reader.bookmarks.emptyMessage` | Use the bookmark button at the top to save the page you are reading. | Yi amfani da maɓallin alama da ke sama don adana shafin da kake karantawa. | Utilisez le bouton signet en haut de l’écran pour garder la page que vous lisez. | T2.6 |
 | `reader.menu.more` | More options | Ƙarin zaɓuɓɓuka | Plus d’options | T2.6 |
 | `reader.menu.title` | Reading options | Zaɓuɓɓukan karatu | Options de lecture | T2.6 |
+| `reader.selection.selectAll` | Select all text on this page | Zaɓi duk rubutun da ke wannan shafi | Sélectionner tout le texte de cette page | T2.8 |
+| `reader.selection.actions` | Selected text actions | Ayyukan rubutun da aka zaɓa | Actions sur le texte sélectionné | T2.8 |
+| `reader.selection.copy` | Copy | Kwafa | Copier | T2.8 |
+| `reader.selection.share` | Share | Raba | Partager | T2.8 |
+| `reader.selection.copied` | Copied | An kwafa | Copié | T2.8 |
+| `reader.selection.selected_one` | Selected: {{value}} character | An zaɓi harafi {{value}} | Sélection : {{value}} caractère | T2.8 |
+| `reader.selection.selected_many` | Selected: {{value}} characters | An zaɓi haruffa {{value}} | Sélection : {{value}} de caractères | T2.8 |
+| `reader.selection.selected_other` | Selected: {{value}} characters | An zaɓi haruffa {{value}} | Sélection : {{value}} caractères | T2.8 |
+| `reader.selection.imageOnly` | This page is an image; text can’t be selected | Wannan shafi hoto ne; ba za a iya zaɓar rubutu a cikinsa ba | Cette page est une image ; son texte ne peut pas être sélectionné | T2.8 |

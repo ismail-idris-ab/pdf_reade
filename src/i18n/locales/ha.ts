@@ -307,6 +307,17 @@ export const ha: Catalog = {
       more: 'Ƙarin zaɓuɓɓuka',
       title: 'Zaɓuɓɓukan karatu',
     },
+    selection: {
+      selectAll: 'Zaɓi duk rubutun da ke wannan shafi',
+      actions: 'Ayyukan rubutun da aka zaɓa',
+      copy: 'Kwafa',
+      share: 'Raba',
+      copied: 'An kwafa',
+      selected_one: 'An zaɓi harafi {{value}}',
+      selected_many: 'An zaɓi haruffa {{value}}',
+      selected_other: 'An zaɓi haruffa {{value}}',
+      imageOnly: 'Wannan shafi hoto ne; ba za a iya zaɓar rubutu a cikinsa ba',
+    },
   },
   settings: {
     title: 'Saituna',

@@ -1,6 +1,7 @@
 import {
   palettes,
   searchHighlights,
+  textSelectionColors,
   THEMES,
   toRgbChannels,
   type ColorToken,
@@ -93,5 +94,29 @@ describe('search highlights', () => {
   it.each(THEMES)('%s outlines the current match visibly against the page', (theme) => {
     const { paper } = PAPER[theme];
     expect(contrast(searchHighlights[theme].currentStroke, paper)).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('text selection', () => {
+  it.each(THEMES)('%s keeps the selected text readable', (theme) => {
+    const { paper, ink } = PAPER[theme];
+    const colors = textSelectionColors[theme];
+    expect(contrast(ink, blend(colors.fill, colors.fillOpacity, paper))).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  });
+
+  it.each(THEMES)('%s draws handles visible against the page', (theme) => {
+    expect(contrast(textSelectionColors[theme].handle, PAPER[theme].paper)).toBeGreaterThanOrEqual(
+      3,
+    );
+  });
+
+  it('dark works on white paper too (the dark theme does not invert pages)', () => {
+    const colors = textSelectionColors.dark;
+    expect(
+      contrast('#000000', blend(colors.fill, colors.fillOpacity, '#FFFFFF')),
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(colors.handle, '#FFFFFF')).toBeGreaterThanOrEqual(3);
   });
 });

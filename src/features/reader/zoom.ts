@@ -14,6 +14,18 @@ export const DOUBLE_TAP_ZOOM = 2.5;
  */
 export const DOUBLE_TAP_MAX_DELAY_MS = 250;
 
+/**
+ * Hold time that starts a text selection (T2.8), ms. Below RNGH's 500 ms tap
+ * limit, so a press held this long is never also a tap.
+ */
+export const LONG_PRESS_MS = 450;
+
+/**
+ * How far a finger may move during that hold, dp: no more than Android's
+ * touch slop, so a slow drag fails the long press before the list scrolls.
+ */
+export const LONG_PRESS_MAX_DISTANCE = 8;
+
 /** Each screen-reader "zoom in" / "zoom out" action multiplies or divides by this. */
 export const ACCESSIBILITY_ZOOM_STEP = 1.5;
 

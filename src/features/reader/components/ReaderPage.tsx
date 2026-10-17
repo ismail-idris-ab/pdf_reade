@@ -39,6 +39,8 @@ export type ReaderPageProps = {
    * cannot pinch or double tap the page.
    */
   onZoomStep: (direction: 'in' | 'out') => void;
+  /** Screen-reader "select all text on this page" (TalkBack users cannot long-press text). */
+  onSelectAll: (page: number) => void;
   /**
    * Whether a render error should be shown in the cell; false drops it (e.g.
    * the document was closed under this view while the reader is closing).
@@ -63,6 +65,7 @@ export const ReaderPage = memo(function ReaderPage({
   sepia,
   onTap,
   onZoomStep,
+  onSelectAll,
   acceptRenderError,
   renderOverlay,
 }: ReaderPageProps) {
@@ -100,15 +103,19 @@ export const ReaderPage = memo(function ReaderPage({
         case 'zoomOut':
           onZoomStep('out');
           return;
+        case 'selectText':
+          onSelectAll(page);
+          return;
       }
     },
-    [onTap, onZoomStep],
+    [onTap, onZoomStep, onSelectAll, page],
   );
   const accessibilityActions = useMemo(
     () => [
       { name: 'activate' },
       { name: 'zoomIn', label: t('reader.zoomIn') },
       { name: 'zoomOut', label: t('reader.zoomOut') },
+      { name: 'selectText', label: t('reader.selection.selectAll') },
     ],
     [t],
   );

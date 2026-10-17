@@ -103,6 +103,25 @@ export const searchHighlights: Record<ThemeName, SearchHighlightColors> = {
   },
 };
 
+/**
+ * Text selection over the rendered page (T2.8), chosen against each theme's
+ * paper like the search highlights: a translucent fill that keeps the text
+ * underneath readable, and handles that stand out from the page. Dark-theme
+ * colours work on white paper (the dark app theme does not invert pages) and
+ * on inverted black paper alike.
+ */
+export type TextSelectionColors = {
+  fill: string;
+  fillOpacity: number;
+  handle: string;
+};
+
+export const textSelectionColors: Record<ThemeName, TextSelectionColors> = {
+  light: { fill: '#2563EB', fillOpacity: 0.3, handle: '#1D4ED8' },
+  dark: { fill: '#3B82F6', fillOpacity: 0.35, handle: '#3B82F6' },
+  sepia: { fill: '#2563EB', fillOpacity: 0.25, handle: '#1D4ED8' },
+};
+
 /** Status bar content style that stays readable on each theme's background. */
 export const statusBarStyle: Record<ThemeName, 'light' | 'dark'> = {
   light: 'dark',

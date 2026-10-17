@@ -1,12 +1,19 @@
 /** Shortest gap between two throttled announcements, ms. */
 export const ANNOUNCE_INTERVAL_MS = 1500;
 
+/** A message, or a function that builds it only when it is actually announced. */
+export type Announcement = string | (() => string);
+
+const resolve = (message: Announcement) => (typeof message === 'string' ? message : message());
+
 export type ThrottledAnnouncer = {
   /**
    * Announces now, or once the interval has passed (only the latest message
-   * waits). A message equal to the last one announced is skipped.
+   * waits). A message equal to the last one announced is skipped. A function
+   * is called only if its message is announced (never for one superseded
+   * while waiting).
    */
-  say: (message: string) => void;
+  say: (message: Announcement) => void;
   /** Announces now, always, dropping any message still waiting. */
   sayNow: (message: string) => void;
   /** Forgets the last message and drops a waiting one (a new search starts). */
@@ -26,7 +33,7 @@ export function createThrottledAnnouncer(
 ): ThrottledAnnouncer {
   let lastAt = -Infinity;
   let lastMessage: string | null = null;
-  let waiting: string | null = null;
+  let waiting: Announcement | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   function dropWaiting() {
@@ -56,13 +63,13 @@ export function createThrottledAnnouncer(
     say: (message) => {
       const wait = lastAt + intervalMs - now();
       if (wait <= 0) {
-        emitThrottled(message);
+        emitThrottled(resolve(message));
         return;
       }
       waiting = message;
       timer ??= setTimeout(() => {
         timer = null;
-        if (waiting !== null) emitThrottled(waiting);
+        if (waiting !== null) emitThrottled(resolve(waiting));
       }, wait);
     },
     sayNow: emit,

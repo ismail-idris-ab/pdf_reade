@@ -308,6 +308,17 @@ export const en = {
       more: 'More options',
       title: 'Reading options',
     },
+    selection: {
+      selectAll: 'Select all text on this page',
+      actions: 'Selected text actions',
+      copy: 'Copy',
+      share: 'Share',
+      copied: 'Copied',
+      selected_one: 'Selected: {{value}} character',
+      selected_many: 'Selected: {{value}} characters',
+      selected_other: 'Selected: {{value}} characters',
+      imageOnly: 'This page is an image; text can’t be selected',
+    },
   },
   settings: {
     title: 'Settings',

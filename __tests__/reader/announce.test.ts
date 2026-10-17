@@ -62,4 +62,19 @@ describe('createThrottledAnnouncer — final messages and new searches', () => {
     announcer.say('2 results so far');
     expect(announce).toHaveBeenCalledTimes(2);
   });
+
+  it('builds a lazy message only when it is announced', () => {
+    const announce = jest.fn();
+    const announcer = createThrottledAnnouncer(announce, 1000);
+    announcer.sayNow('start');
+    const skipped = jest.fn(() => 'skipped');
+    const latest = jest.fn(() => 'latest');
+    announcer.say(skipped);
+    announcer.say(latest);
+    expect(skipped).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1000);
+    expect(skipped).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledTimes(1);
+    expect(announce.mock.calls).toEqual([['start'], ['latest']]);
+  });
 });
